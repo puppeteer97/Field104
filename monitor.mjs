@@ -68,18 +68,43 @@ const client = new Client({
 
 client.once(Events.ClientReady, () => {
   console.log("Logged in as:", client.user.tag);
+
+  // ---- Test: send a message every 10 seconds ----
+  const testChannel = client.channels.cache.get(CHANNEL_ID);
+  if (!testChannel) {
+    console.log("Cannot find channel with CHANNEL_ID:", CHANNEL_ID);
+    return;
+  }
+
+  setInterval(() => {
+    testChannel.send("Ping test from bot 🟢").catch(err => {
+      console.log("Failed to send ping:", err.message);
+    });
+  }, 10000); // every 10 seconds
 });
 
 client.on(Events.MessageCreate, async msg => {
   try {
-    if (msg.author.id !== GAME_BOT_ID) return;
-    if (msg.channelId !== CHANNEL_ID) return;
+    // ---- DEBUG: Log all incoming messages ----
+    console.log(`Received message from ${msg.author.username} (${msg.author.id}) in channel ${msg.channelId}`);
+    console.log(`Message content: "${msg.content}"`);
+    console.log(`Attachments: ${msg.attachments.size}`);
 
-    console.log("\nIncoming message...");
+    // ---- Filter for game bot and channel ----
+    if (msg.author.id !== GAME_BOT_ID) {
+      console.log("Ignored: Not the game bot.");
+      return;
+    }
+    if (msg.channelId !== CHANNEL_ID) {
+      console.log("Ignored: Not the target channel.");
+      return;
+    }
+
+    console.log("\nIncoming message from game bot...");
 
     const attachment = msg.attachments.first();
     if (!attachment) {
-      console.log("No image, skipping.");
+      console.log("No image attachment, skipping OCR.");
       return;
     }
 
