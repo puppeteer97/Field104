@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 3000;
 const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL;
 
 // ---------------- PUSHOVER ----------------
-const PUSH_USER = "ujnc9uqujzv47eyrgh5xqbniy69mzu";
-const PUSH_APP  = "abe2jw7vwhnkn784wvn794hkcixx61";
+const PUSH_USER = "uuu";
+const PUSH_APP  = "uuu";
 
 async function sendPushover(message) {
   await fetch("https://api.pushover.net/1/messages.json", {
@@ -125,3 +125,4 @@ client.on(Events.MessageCreate, async msg => {
 });
 
 client.login(TOKEN);
+
