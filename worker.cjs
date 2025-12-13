@@ -11,37 +11,21 @@ const TESSDATA = process.env.TESSDATA_PREFIX;
 // ---------------- PARSER ----------------
 function extractG(text) {
   if (!text) return null;
-
-  for (let raw of text.split(/\s+/)) {
-    let s = raw.toUpperCase().replace(/[^0-9GI]/g, "");
-    if (!s.includes("G")) continue;
-
-    s = s.slice(s.indexOf("G"));
-    s = s.replace(/^6/, "G");
-    s = s.replace(/^GL/, "G1");
-    s = s.replace(/^GI+/, m => "G" + "1".repeat(m.length - 1));
-
-    const digits = s.slice(1).replace(/\D/g, "");
-    if (!digits) continue;
-
-    return "G" + digits.slice(-4);
-  }
-  return null;
+  const m = text.toUpperCase().match(/G\d{1,4}/);
+  return m ? m[0] : null;
 }
 
 // ---------------- PREPROCESS ----------------
 async function preprocess(buf) {
   return sharp(buf)
     .extractChannel("green")
-    .resize({ height: 40, kernel: sharp.kernel.nearest })
-    .normalize()
+    .resize({ height: 32, kernel: sharp.kernel.nearest })
     .threshold(135)
-    .sharpen()
     .png()
     .toBuffer();
 }
 
-// ---------------- TESSERACT ----------------
+// ---------------- TESSERACT (FIXED) ----------------
 function ocr(img) {
   return new Promise(resolve => {
     const id = Math.random().toString(36).slice(2);
@@ -59,16 +43,16 @@ function ocr(img) {
       "--tessdata-dir", TESSDATA,
       "-c", "tessedit_char_whitelist=G0123456789",
       "-c", "load_system_dawg=0",
-      "-c", "load_freq_dawg=0",
-      "-c", "load_punc_dawg=0",
-      "-c", "load_number_dawg=0"
-    ]);
+      "-c", "load_freq_dawg=0"
+    ], {
+      stdio: ["ignore", "ignore", "ignore"] // 🔥 CRITICAL FIX
+    });
 
     p.on("exit", () => {
       let txt = "";
       try { txt = fs.readFileSync(outPath + ".txt", "utf8").trim(); } catch {}
-      fs.rm(imgPath, { force: true }, () => {});
-      fs.rm(outPath + ".txt", { force: true }, () => {});
+      fs.rmSync(imgPath, { force: true });
+      fs.rmSync(outPath + ".txt", { force: true });
       resolve(txt);
     });
 
@@ -84,7 +68,6 @@ async function runOCR(buf) {
     .toBuffer();
 
   const gValues = [];
-  const rawOCR = [];
 
   for (let i = 0; i < 3; i++) {
     const crop = await sharp(strip)
@@ -94,19 +77,13 @@ async function runOCR(buf) {
 
     const prep = await preprocess(crop);
     const raw = await ocr(prep);
-
-    rawOCR.push(raw);
     gValues.push(extractG(raw));
   }
 
-  return { rawOCR, gValues };
+  return { gValues };
 }
 
 parentPort.on("message", async ({ id, buffer }) => {
-  try {
-    const result = await runOCR(buffer);
-    parentPort.postMessage({ id, result });
-  } catch (e) {
-    parentPort.postMessage({ id, result: null });
-  }
+  const result = await runOCR(buffer);
+  parentPort.postMessage({ id, result });
 });
