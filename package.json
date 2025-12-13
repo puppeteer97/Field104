@@ -1,9 +1,9 @@
 {
   "name": "ocrbot",
   "version": "1.0.0",
-  "main": "bot.cjs",
+  "main": "app.cjs",
   "scripts": {
-    "start": "node bot.cjs"
+    "start": "node app.cjs"
   },
   "dependencies": {
     "discord.js": "^14.25.1",
