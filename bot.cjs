@@ -3,7 +3,7 @@ const { Worker } = require("worker_threads");
 const { fetch } = require("undici");
 
 // ---------------------------------------------------------
-// DISCORD CONFIG (ENV VARIABLES)
+// ENV CONFIG (RENDER)
 // ---------------------------------------------------------
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
@@ -31,7 +31,7 @@ function runWorker(buffer) {
 }
 
 // ---------------------------------------------------------
-// WORKER POOL
+// WORKER POOL (LOW RAM)
 // ---------------------------------------------------------
 const MAX_WORKERS = 3;
 let activeWorkers = 0;
@@ -45,8 +45,7 @@ function queuedWorker(buffer) {
 }
 
 function processQueue() {
-  if (activeWorkers >= MAX_WORKERS) return;
-  if (queue.length === 0) return;
+  if (activeWorkers >= MAX_WORKERS || queue.length === 0) return;
 
   const { buffer, resolve, reject } = queue.shift();
   activeWorkers++;
@@ -67,20 +66,15 @@ async function runWorkerWithRetry(buffer, attempt) {
   try {
     const output = await runWorker(buffer);
     const gVals = output?.result?.gValues || [];
-
     const allNull = gVals.length === 3 && gVals.every(v => v === null);
 
     if (allNull && attempt < 2) {
-      console.log(`OCR empty → retrying (attempt ${attempt + 2})`);
-      return await runWorkerWithRetry(buffer, attempt + 1);
+      return runWorkerWithRetry(buffer, attempt + 1);
     }
-
     return output;
-
-  } catch (err) {
+  } catch {
     if (attempt < 2) {
-      console.log(`Worker/OCR error → retrying (attempt ${attempt + 2})`);
-      return await runWorkerWithRetry(buffer, attempt + 1);
+      return runWorkerWithRetry(buffer, attempt + 1);
     }
     throw err;
   }
@@ -98,7 +92,7 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log("🤖 Bot online");
 });
 
 // ---------------------------------------------------------
@@ -112,37 +106,15 @@ client.on(Events.MessageCreate, async (msg) => {
     const attachment = msg.attachments.first();
     if (!attachment) return;
 
-    console.log("\n==============================");
-    console.log("📸 New image:", attachment.url);
-    console.log("==============================");
-
     const res = await fetch(attachment.url);
     const buffer = Buffer.from(await res.arrayBuffer());
 
-    const workerOutput = await queuedWorker(buffer);
+    const out = await queuedWorker(buffer);
+    if (!out?.result) return;
 
-    if (workerOutput.err) {
-      console.log("❌ Worker error:", workerOutput.err);
-      return;
-    }
-
-    const result = workerOutput.result || {};
-    const raw = result.rawOCR || [];
-    const gValues = result.gValues || [];
-
-    console.log(
-      `RAW → [C1] ${raw[0] || "<empty>"}  |  [C2] ${raw[1] || "<empty>"}  |  [C3] ${raw[2] || "<empty>"}`
-    );
-
-    console.log("RESULT →", JSON.stringify(gValues));
-    console.log("------------------------------");
-
-  } catch (e) {
-    console.log("❌ Bot Error:", e.message);
-  }
+    console.log("G →", out.result.gValues);
+  } catch {}
 });
 
-// ---------------------------------------------------------
-// START BOT
 // ---------------------------------------------------------
 client.login(TOKEN);
