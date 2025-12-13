@@ -1,9 +1,7 @@
 services:
-  - type: web
+  - type: worker
     name: ocrbot
     env: docker
     plan: starter
     region: oregon
-    numInstances: 1
     autoDeploy: true
-    # If Render UI needs a start command override, it will use Docker CMD in Dockerfile.
