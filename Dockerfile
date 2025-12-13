@@ -1,5 +1,5 @@
 # Use Node 18 on Debian Bullseye slim
-FROM node:18-bullseye
+FROM node:20-bullseye
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -31,3 +31,4 @@ RUN mkdir -p /app/tessdata
 
 # Expose nothing (bot runs in background). Start command uses node bot.cjs
 CMD ["npm", "start"]
+
