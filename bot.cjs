@@ -1,3 +1,4 @@
+const http = require("http");
 const { Client, GatewayIntentBits, Events } = require("discord.js");
 const { Worker } = require("worker_threads");
 const { fetch } = require("undici");
@@ -6,8 +7,35 @@ const { fetch } = require("undici");
 const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const GAME_BOT_ID = process.env.GAME_BOT_ID;
+const PORT = process.env.PORT || 3000;
 
-// ---------------- WORKER POOL ----------------
+// External keep-alive URL (optional but recommended)
+const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL;
+
+// ---------------- HTTP SERVER ----------------
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200);
+    return res.end("ok");
+  }
+
+  res.writeHead(200);
+  res.end("OCR bot running");
+});
+
+server.listen(PORT, () => {
+  console.log(`🌐 HTTP server listening on ${PORT}`);
+});
+
+// ---------------- OPTIONAL EXTERNAL PING ----------------
+// NOTE: Helps smooth idle cycles but does NOT bypass Render sleep alone
+if (KEEP_ALIVE_URL) {
+  setInterval(() => {
+    fetch(KEEP_ALIVE_URL).catch(() => {});
+  }, 5 * 60 * 1000);
+}
+
+// ---------------- WORKER QUEUE ----------------
 const MAX_WORKERS = 3;
 let active = 0;
 const queue = [];
@@ -71,7 +99,7 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, () => {
-  console.log("🤖 OCR bot online");
+  console.log("🤖 Discord bot online");
 });
 
 client.on(Events.MessageCreate, async msg => {
@@ -89,7 +117,7 @@ client.on(Events.MessageCreate, async msg => {
     if (out?.result) {
       console.log("G →", out.result.gValues);
     }
-  } catch (e) {}
+  } catch {}
 });
 
 client.login(TOKEN);
