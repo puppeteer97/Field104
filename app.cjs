@@ -10,6 +10,22 @@ const GAME_BOT_ID = process.env.GAME_BOT_ID;
 const PORT = process.env.PORT || 3000;
 const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL;
 
+// ---------------- PUSHOVER ----------------
+const PUSH_USER = "ujnc9uqujzv47eyrgh5xqbniy69mzu";
+const PUSH_APP  = "abe2jw7vwhnkn784wvn794hkcixx61";
+
+async function sendPushover(message) {
+  await fetch("https://api.pushover.net/1/messages.json", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      token: PUSH_APP,
+      user: PUSH_USER,
+      message
+    })
+  });
+}
+
 // ---------------- HTTP SERVER ----------------
 http.createServer((req, res) => {
   res.writeHead(200);
@@ -32,12 +48,21 @@ const queue = [];
 let busy = false;
 let jobId = 0;
 
-worker.on("message", ({ id, result }) => {
+worker.on("message", async ({ id, result }) => {
   const job = queue.shift();
   busy = false;
 
   if (job && job.resolve) {
     job.resolve(result);
+  }
+
+  // 📲 SEND PUSHOVER WHEN 3 G VALUES EXIST
+  if (result?.gValues?.length === 3) {
+    const msg = `🎴 G VALUES\n${result.gValues.join("  ")}`;
+    await sendPushover(msg);
+    console.log("[PUSHOVER SENT]", result.gValues);
+  } else {
+    console.log("[WARN] Invalid G count:", result?.gValues);
   }
 
   processQueue();
@@ -92,9 +117,8 @@ client.on(Events.MessageCreate, async msg => {
     const buf = Buffer.from(await res.arrayBuffer());
 
     console.log("[QUEUE] +1 image");
-    const result = await enqueue(buf);
+    await enqueue(buf);
 
-    console.log("[OCR RESULT]", result?.gValues);
   } catch (e) {
     console.error("[MSG ERROR]", e);
   }
