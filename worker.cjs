@@ -3,32 +3,25 @@ const sharp = require("sharp");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
-// --------------------------------------------------
-// TESSERACT (RENDER / DOCKER)
-// --------------------------------------------------
-const TESS_EXE = process.env.TESS_EXE || "/usr/bin/tesseract";
-const TESSDATA_DIR = process.env.TESSDATA_DIR || path.join(__dirname, "tessdata");
+const TESS = "/usr/bin/tesseract";
+const TESSDATA = process.env.TESSDATA_PREFIX;
 
-// --------------------------------------------------
-// G PARSER (UNCHANGED LOGIC)
-// --------------------------------------------------
+// ---------------- PARSER ----------------
 function extractG(text) {
   if (!text) return null;
 
   for (let raw of text.split(/\s+/)) {
     let s = raw.toUpperCase().replace(/[^0-9GI]/g, "");
-    if (!s) continue;
+    if (!s.includes("G")) continue;
 
-    const gPos = s.indexOf("G");
-    if (gPos > 0) s = s.slice(gPos);
-    if (/^6\d+/.test(s)) s = "G" + s.slice(1);
-    if (/^GL/.test(s)) s = "G1" + s.slice(2);
-    if (/^GI+/.test(s)) s = "G" + "1".repeat(s.length - 1);
+    s = s.slice(s.indexOf("G"));
+    s = s.replace(/^6/, "G");
+    s = s.replace(/^GL/, "G1");
+    s = s.replace(/^GI+/, m => "G" + "1".repeat(m.length - 1));
 
-    if (!s.startsWith("G")) continue;
-
-    let digits = s.slice(1).replace(/\D/g, "");
+    const digits = s.slice(1).replace(/\D/g, "");
     if (!digits) continue;
 
     return "G" + digits.slice(-4);
@@ -36,13 +29,11 @@ function extractG(text) {
   return null;
 }
 
-// --------------------------------------------------
-// PREPROCESS (ACCURACY TUNED)
-// --------------------------------------------------
+// ---------------- PREPROCESS ----------------
 async function preprocess(buf) {
   return sharp(buf)
     .extractChannel("green")
-    .resize({ height: 40 })
+    .resize({ height: 40, kernel: sharp.kernel.nearest })
     .normalize()
     .threshold(135)
     .sharpen()
@@ -50,48 +41,50 @@ async function preprocess(buf) {
     .toBuffer();
 }
 
-// --------------------------------------------------
-// TESSERACT RUN
-// --------------------------------------------------
-function runTesseract(img) {
-  return new Promise((resolve) => {
-    const imgPath = path.join(__dirname, "ocr.png");
-    const outPath = path.join(__dirname, "ocr");
+// ---------------- TESSERACT ----------------
+function ocr(img) {
+  return new Promise(resolve => {
+    const id = Math.random().toString(36).slice(2);
+    const imgPath = path.join(os.tmpdir(), `ocr-${id}.png`);
+    const outPath = path.join(os.tmpdir(), `ocr-${id}`);
 
     fs.writeFileSync(imgPath, img);
 
-    const p = spawn(TESS_EXE, [
+    const p = spawn(TESS, [
       imgPath,
       outPath,
-      "--dpi", "300",
-      "--psm", "7",
       "-l", "g",
-      "--tessdata-dir", TESSDATA_DIR,
-      "-c", "tessedit_char_whitelist=G0123456789"
+      "--psm", "7",
+      "--dpi", "300",
+      "--tessdata-dir", TESSDATA,
+      "-c", "tessedit_char_whitelist=G0123456789",
+      "-c", "load_system_dawg=0",
+      "-c", "load_freq_dawg=0",
+      "-c", "load_punc_dawg=0",
+      "-c", "load_number_dawg=0"
     ]);
 
     p.on("exit", () => {
-      try {
-        resolve(fs.readFileSync(outPath + ".txt", "utf8").trim());
-      } catch {
-        resolve("");
-      }
+      let txt = "";
+      try { txt = fs.readFileSync(outPath + ".txt", "utf8").trim(); } catch {}
+      fs.rm(imgPath, { force: true }, () => {});
+      fs.rm(outPath + ".txt", { force: true }, () => {});
+      resolve(txt);
     });
 
     p.on("error", () => resolve(""));
   });
 }
 
-// --------------------------------------------------
-// OCR PIPELINE
-// --------------------------------------------------
-async function runOCR(buffer) {
-  const strip = await sharp(buffer)
+// ---------------- PIPELINE ----------------
+async function runOCR(buf) {
+  const strip = await sharp(buf)
     .extract({ left: 0, top: 427, width: 1008, height: 31 })
     .png()
     .toBuffer();
 
-  const results = [];
+  const gValues = [];
+  const rawOCR = [];
 
   for (let i = 0; i < 3; i++) {
     const crop = await sharp(strip)
@@ -100,22 +93,20 @@ async function runOCR(buffer) {
       .toBuffer();
 
     const prep = await preprocess(crop);
-    const raw = await runTesseract(prep);
-    results.push({ raw, g: extractG(raw) });
+    const raw = await ocr(prep);
+
+    rawOCR.push(raw);
+    gValues.push(extractG(raw));
   }
 
-  return {
-    rawOCR: results.map(r => r.raw),
-    gValues: results.map(r => r.g)
-  };
+  return { rawOCR, gValues };
 }
 
-// --------------------------------------------------
 parentPort.on("message", async ({ id, buffer }) => {
   try {
     const result = await runOCR(buffer);
-    parentPort.postMessage({ id, err: null, result });
+    parentPort.postMessage({ id, result });
   } catch (e) {
-    parentPort.postMessage({ id, err: e.message, result: null });
+    parentPort.postMessage({ id, result: null });
   }
 });
