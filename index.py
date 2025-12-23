@@ -435,10 +435,14 @@ def stats():
     return jsonify(message_counts)
 
 def run_flask():
+    from werkzeug.serving import make_server
     port = int(os.environ.get('PORT', 10000))
-    log(f'🌐 HTTP server running on port {port}')
+    log(f'🌐 HTTP server starting on port {port}')
+    
+    server = make_server('0.0.0.0', port, app, threaded=True)
+    log(f'✅ Flask server ready')
     log(f'🔗 Keep-alive URL: http://localhost:{port}/ping\n')
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    server.serve_forever()
 
 # -----------------------------------
 # Main Execution
@@ -461,12 +465,7 @@ if __name__ == '__main__':
     log(f'[BOT-A] ⏳ Starting in {initial_delay_a} seconds...')
     log(f'[BOT-B] ⏳ Starting in {initial_delay_b} seconds...\n')
     
-    # Start Flask server in background
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    time.sleep(2)
-    
+    # Start bot threads FIRST (before Flask)
     # Start Bot A loop with proper thread function
     def start_bot_a():
         log('[BOT-A] 🔵 Thread started, waiting for initial delay...')
@@ -481,25 +480,16 @@ if __name__ == '__main__':
         log('[BOT-B] 🟢 Initial delay complete, starting main loop...')
         bot_b_loop()
     
-    bot_a_thread = threading.Thread(target=start_bot_a, daemon=True)
+    bot_a_thread = threading.Thread(target=start_bot_a, daemon=False)  # Changed to non-daemon
     bot_a_thread.start()
     log(f'✅ Bot A thread started: {bot_a_thread.is_alive()}')
     
-    bot_b_thread = threading.Thread(target=start_bot_b, daemon=True)
+    bot_b_thread = threading.Thread(target=start_bot_b, daemon=False)  # Changed to non-daemon
     bot_b_thread.start()
-    log(f'✅ Bot B thread started: {bot_b_thread.is_alive()}')
+    log(f'✅ Bot B thread started: {bot_b_thread.is_alive()}\n')
     
-    # Keep main thread alive
-    try:
-        log('✅ All threads started, bot is now running...')
-        log('📊 Check /stats endpoint for activity')
-        
-        while True:
-            time.sleep(60)
-            
-            # Health check every minute to show activity
-            uptime_mins = int((time.time() - start_time) / 60)
-            log(f'💓 Uptime: {uptime_mins} mins | Bot A: {message_counts["botA"]} | Bot B: {message_counts["botB"]} | Errors: {message_counts["errors"]}')
-                
-    except KeyboardInterrupt:
-        log('📴 Shutting down gracefully...')
+    time.sleep(1)  # Give threads a moment to start
+    
+    # Start Flask server last (in main thread, not daemon)
+    log('🌐 Starting Flask server in main thread...')
+    run_flask()
