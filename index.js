@@ -126,7 +126,9 @@ function scheduleNextB() {
 }
 
 client.on('ready', async () => {
+  console.log('🎊 READY EVENT FIRED!');
   console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`👤 User ID: ${client.user.id}`);
   console.log('👀 Monitoring bot responses...');
   console.log('🤖 Auto-sending commands...\n');
   
@@ -366,15 +368,29 @@ client.once('ready', () => {
   setInterval(selfPing, KEEP_ALIVE_INTERVAL);
 });
 
-// Login with error handling
+// Login with error handling and timeout
 console.log('🔐 Attempting to login...');
+
+// Set a timeout to detect if login hangs
+const loginTimeout = setTimeout(() => {
+  console.error('⏰ Login timeout - no response after 30 seconds');
+  console.error('This usually means:');
+  console.error('1. Invalid token format');
+  console.error('2. Account is locked/disabled');
+  console.error('3. Network connectivity issues');
+  process.exit(1);
+}, 30000);
+
 client.login(TOKEN)
   .then(() => {
-    console.log('✅ Login successful!');
+    console.log('✅ Login promise resolved!');
+    clearTimeout(loginTimeout);
   })
   .catch((error) => {
+    clearTimeout(loginTimeout);
     console.error('❌ Login failed!');
     console.error('Error:', error.message);
+    console.error('Error code:', error.code);
     console.error('Full error:', error);
     process.exit(1);
   });
