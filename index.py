@@ -61,17 +61,27 @@ def send_message(channel_id, content):
             r = session.post(url, headers=get_headers(), json={'content': content}, timeout=10)
             
             if r.status_code in [200, 204]:
-                log(f'✅ Sent: {content}')
-                return r.json() if r.text else {}
-            elif r.status_code == 429:
-                time.sleep(r.json().get('retry_after', 60))
+                try:
+                    return r.json()
+                except Exception:
+                    log(f'⚠️ Non-JSON success response: {r.text[:200]}')
+                    return {}
             else:
-                log(f'⚠️ HTTP {r.status_code}')
+                log(f'⚠️ HTTP {r.status_code}: {r.text[:200]}')
+                
+            if r.status_code == 429:
+                retry_after = r.json().get('retry_after', 60)
+                log(f'Rate limited, waiting {retry_after}s')
+                time.sleep(retry_after)
+            elif r.status_code in [401, 403]:
+                log(f'🚫 AUTH ERROR! TOKEN IS INVALID OR EXPIRED')
+                return None
                 
         except Exception as e:
-            log(f'⚠️ Error: {e}')
+            log(f'⚠️ Exception: {e}')
         
-        time.sleep(3)
+        if attempt < 3:
+            time.sleep(3)
     
     message_counts['errors'] += 1
     return None
@@ -80,8 +90,13 @@ def get_messages(channel_id, limit=10):
     url = f'https://discord.com/api/v9/channels/{channel_id}/messages?limit={limit}'
     try:
         r = session.get(url, headers=get_headers(), timeout=10)
-        return r.json() if r.status_code == 200 else []
-    except:
+        if r.status_code == 200:
+            return r.json()
+        else:
+            log(f'⚠️ Get messages HTTP {r.status_code}: {r.text[:200]}')
+            return []
+    except Exception as e:
+        log(f'⚠️ Get messages error: {e}')
         return []
 
 def click_button(message_id, channel_id, custom_id, guild_id):
@@ -100,7 +115,7 @@ def click_button(message_id, channel_id, custom_id, guild_id):
         r = session.post(url, headers=get_headers(), json=payload, timeout=10)
         if r.status_code in [200, 204]:
             return True
-        log(f'⚠️ Button click: HTTP {r.status_code}')
+        log(f'⚠️ Button click HTTP {r.status_code}: {r.text[:200]}')
         return False
     except Exception as e:
         log(f'⚠️ Button error: {e}')
@@ -157,8 +172,11 @@ def bot_a_loop():
             sent = send_message(BOT_A_CHANNEL_ID, msg)
             if sent:
                 message_counts['botA'] += 1
+                log(f'[BOT-A] ✅ Message sent successfully')
                 if 'id' in sent:
                     check_bot_a_drops(sent['id'])
+            else:
+                log(f'[BOT-A] ❌ Failed to send message')
         except Exception as e:
             log(f'[BOT-A] Loop error: {e}')
         
@@ -222,8 +240,11 @@ def bot_b_loop():
             sent = send_message(BOT_B_CHANNEL_ID, msg)
             if sent:
                 message_counts['botB'] += 1
+                log(f'[BOT-B] ✅ Message sent successfully')
                 if 'id' in sent:
                     check_bot_b_drops(sent['id'])
+            else:
+                log(f'[BOT-B] ❌ Failed to send message')
         except Exception as e:
             log(f'[BOT-B] Loop error: {e}')
         
