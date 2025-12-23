@@ -465,22 +465,35 @@ if __name__ == '__main__':
     
     time.sleep(2)
     
-    # Start Bot A loop
-    bot_a_thread = threading.Thread(target=lambda: (time.sleep(initial_delay_a), bot_a_loop()), daemon=True)
-    bot_a_thread.start()
+    # Start Bot A loop with proper thread function
+    def start_bot_a():
+        time.sleep(initial_delay_a)
+        bot_a_loop()
     
-    # Start Bot B loop
-    bot_b_thread = threading.Thread(target=lambda: (time.sleep(initial_delay_b), bot_b_loop()), daemon=True)
+    # Start Bot B loop with proper thread function
+    def start_bot_b():
+        time.sleep(initial_delay_b)
+        bot_b_loop()
+    
+    bot_a_thread = threading.Thread(target=start_bot_a, daemon=True)
+    bot_a_thread.start()
+    log(f'✅ Bot A thread started: {bot_a_thread.is_alive()}')
+    
+    bot_b_thread = threading.Thread(target=start_bot_b, daemon=True)
     bot_b_thread.start()
+    log(f'✅ Bot B thread started: {bot_b_thread.is_alive()}')
     
     # Keep main thread alive
     try:
+        log('✅ All threads started, bot is now running...')
+        log('📊 Check /stats endpoint for activity')
+        
         while True:
             time.sleep(60)
             
-            # Health check every 5 minutes
-            if time.time() % 300 < 60:
-                log('💓 Service is alive')
+            # Health check every minute to show activity
+            uptime_mins = int((time.time() - start_time) / 60)
+            log(f'💓 Uptime: {uptime_mins} mins | Bot A: {message_counts["botA"]} | Bot B: {message_counts["botB"]} | Errors: {message_counts["errors"]}')
                 
     except KeyboardInterrupt:
         log('📴 Shutting down gracefully...')
