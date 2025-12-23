@@ -2,10 +2,15 @@ import requests
 import time
 import random
 import os
+import sys
 import threading
 import re
 from datetime import datetime
 from flask import Flask, jsonify
+
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+os.environ['PYTHONUNBUFFERED'] = '1'
 
 # -----------------------------------
 # Configuration
@@ -37,7 +42,7 @@ message_counts = {'botA': 0, 'botB': 0, 'errors': 0}
 start_time = time.time()
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 # -----------------------------------
 # Discord API Functions
@@ -296,36 +301,39 @@ def run_server():
 # Main
 # -----------------------------------
 if __name__ == '__main__':
-    log('🚀 Starting Discord Bot')
+    print('🚀 Starting Discord Bot', flush=True)
     
     if not TOKEN:
-        log('❌ AUTH_TOKEN missing!')
+        print('❌ AUTH_TOKEN missing!', flush=True)
         exit(1)
     
-    log(f'✅ Token: {TOKEN[:15]}...{TOKEN[-10:]}')
+    print(f'✅ Token: {TOKEN[:15]}...{TOKEN[-10:]}', flush=True)
+    print('---CHECKPOINT 1---', flush=True)    print('---CHECKPOINT 1---', flush=True)
     
     # Start bots FIRST
-    log('[BOT-A] 🔵 Starting SD bot thread...')
+    print('[BOT-A] 🔵 Starting SD bot thread...', flush=True)
     bot_a_thread = threading.Thread(target=bot_a_loop, daemon=True)
     bot_a_thread.start()
-    log(f'[BOT-A] Thread alive: {bot_a_thread.is_alive()}')
+    print(f'[BOT-A] Thread alive: {bot_a_thread.is_alive()}', flush=True)
     
-    log('[BOT-B] 🔵 Starting NS bot thread...')
+    print('[BOT-B] 🔵 Starting NS bot thread...', flush=True)
     bot_b_thread = threading.Thread(target=bot_b_loop, daemon=True)
     bot_b_thread.start()
-    log(f'[BOT-B] Thread alive: {bot_b_thread.is_alive()}')
+    print(f'[BOT-B] Thread alive: {bot_b_thread.is_alive()}', flush=True)
     
-    log('✅ Bot threads started\n')
+    print('✅ Bot threads started\n', flush=True)
+    print('---CHECKPOINT 2---', flush=True)
     
     # Start Flask LAST in daemon thread
-    log('🌐 Starting Flask in background...')
+    print('🌐 Starting Flask in background...', flush=True)
     threading.Thread(target=run_server, daemon=True).start()
     
     time.sleep(2)
-    log('✅ Flask started\n')
+    print('✅ Flask started\n', flush=True)
+    print('---CHECKPOINT 3---', flush=True)
     
     # Keep alive
-    log('♾️ Main loop running...')
+    print('♾️ Main loop running...', flush=True)
     while True:
         time.sleep(60)
         uptime = int((time.time() - start_time) / 60)
