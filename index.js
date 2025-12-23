@@ -2,7 +2,7 @@ const { Client } = require('discord.js-selfbot-v13');
 const express = require('express');
 
 // Configuration from environment variable
-const TOKEN = process.env.AUTH_TOKEN;
+const TOKEN = process.env.AUTH_TOKEN?.trim().replace(/['"]/g, '');
 
 console.log('🔍 Checking AUTH_TOKEN...');
 if (!TOKEN) {
@@ -35,9 +35,32 @@ const BUTTON_CLICK_DELAY_MAX = 1200; // ms (simulate human reaction time)
 // Keep-alive settings
 const PORT = process.env.PORT || 3000;
 const KEEP_ALIVE_INTERVAL = 4 * 60 * 1000; // 4 minutes in milliseconds
+const MAX_LOGIN_RETRIES = 5;
+const RECONNECT_DELAY = 10000; // 10 seconds
 
+let retryCount = 0;
+let isReconnecting = false;
+let commandLoopsStarted = false;
+
+// Enhanced client configuration
 const client = new Client({
-  checkUpdate: false
+  checkUpdate: false,
+  readyStatus: false,
+  captchaService: undefined,
+  captchaKey: undefined,
+  DMSync: false,
+  patchVoice: false,
+  ws: {
+    properties: {
+      browser: 'Discord Client',
+      os: 'Windows'
+    },
+    large_threshold: 50
+  },
+  http: {
+    version: 9,
+    api: 'https://discord.com/api'
+  }
 });
 
 // Store pending Bot B drops
@@ -125,12 +148,14 @@ function scheduleNextB() {
   }, finalDelay * 1000);
 }
 
-client.on('ready', async () => {
-  console.log('🎊 READY EVENT FIRED!');
-  console.log(`✅ Logged in as ${client.user.tag}`);
-  console.log(`👤 User ID: ${client.user.id}`);
-  console.log('👀 Monitoring bot responses...');
-  console.log('🤖 Auto-sending commands...\n');
+// Start command loops (only once)
+function startCommandLoops() {
+  if (commandLoopsStarted) {
+    console.log('⚠️ Command loops already started, skipping...');
+    return;
+  }
+  
+  commandLoopsStarted = true;
   
   // Random initial delays before first commands
   const initialDelayA = getRandomDelay(0, 30000);
@@ -150,6 +175,53 @@ client.on('ready', async () => {
     await sendCommandB();
     scheduleNextB();
   }, initialDelayB);
+}
+
+// WebSocket debugging
+client.ws.on('open', () => {
+  console.log('🌐 WebSocket opened');
+});
+
+client.ws.on('close', (code, reason) => {
+  console.log(`🔌 WebSocket closed with code: ${code}, reason: ${reason}`);
+  
+  // Don't reconnect if we're already reconnecting or if it was a clean close
+  if (!isReconnecting && code !== 1000) {
+    handleDisconnection();
+  }
+});
+
+client.on('debug', (info) => {
+  if (info.includes('Preparing') || info.includes('Identifying') || info.includes('Heartbeat')) {
+    console.log('🔍 Debug:', info);
+  }
+});
+
+// Handle disconnections
+function handleDisconnection() {
+  if (isReconnecting) return;
+  
+  isReconnecting = true;
+  console.log('⚠️ Connection lost! Attempting to reconnect...');
+  
+  setTimeout(() => {
+    console.log('🔄 Reconnecting...');
+    client.destroy();
+    loginWithRetry();
+  }, RECONNECT_DELAY);
+}
+
+client.on('ready', async () => {
+  console.log('🎊 READY EVENT FIRED!');
+  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`👤 User ID: ${client.user.id}`);
+  console.log('👀 Monitoring bot responses...');
+  console.log('🤖 Auto-sending commands...\n');
+  
+  isReconnecting = false;
+  retryCount = 0; // Reset retry count on successful connection
+  
+  startCommandLoops();
 });
 
 client.on('messageCreate', async (message) => {
@@ -311,13 +383,38 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// Graceful error handling
+// Enhanced error handling
 client.on('error', (error) => {
   console.error('⚠️ Client error:', error.message);
+  
+  // Don't reconnect on certain errors
+  if (error.message.includes('ECONNRESET') || error.message.includes('ETIMEDOUT')) {
+    console.log('Network error detected, will attempt to reconnect...');
+    handleDisconnection();
+  }
+});
+
+client.on('shardError', error => {
+  console.error('⚠️ Shard error:', error);
 });
 
 process.on('unhandledRejection', (error) => {
   console.error('⚠️ Unhandled rejection:', error);
+  
+  // Don't crash the process on unhandled rejections
+  if (error.message && error.message.includes('WebSocket')) {
+    console.log('WebSocket error in promise, attempting recovery...');
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('⚠️ Uncaught exception:', error);
+  
+  // Only exit on critical errors
+  if (error.message && !error.message.includes('WebSocket')) {
+    console.error('Critical error, exiting...');
+    process.exit(1);
+  }
 });
 
 // ===== HTTP SERVER FOR KEEP-ALIVE =====
@@ -333,6 +430,7 @@ app.get('/', (req, res) => {
     status: 'alive',
     uptime: `${hours}h ${minutes}m`,
     user: client.user ? client.user.tag : 'Not logged in',
+    connected: client.ws.status === 0,
     timestamp: new Date().toISOString()
   });
 });
@@ -340,6 +438,16 @@ app.get('/', (req, res) => {
 // Ping endpoint for keep-alive
 app.get('/ping', (req, res) => {
   res.send('pong');
+});
+
+// Status endpoint
+app.get('/status', (req, res) => {
+  res.json({
+    connected: client.ws.status === 0,
+    user: client.user ? client.user.tag : null,
+    retries: retryCount,
+    reconnecting: isReconnecting
+  });
 });
 
 // Start Express server
@@ -368,29 +476,70 @@ client.once('ready', () => {
   setInterval(selfPing, KEEP_ALIVE_INTERVAL);
 });
 
-// Login with error handling and timeout
-console.log('🔐 Attempting to login...');
+// Login with retry logic
+async function loginWithRetry() {
+  if (retryCount >= MAX_LOGIN_RETRIES) {
+    console.error('❌ Max login retries reached. Exiting.');
+    process.exit(1);
+  }
+  
+  console.log(`🔐 Login attempt ${retryCount + 1}/${MAX_LOGIN_RETRIES}...`);
+  
+  const loginTimeout = setTimeout(() => {
+    console.error('⏰ Login timeout - no response after 60 seconds');
+    retryCount++;
+    
+    if (retryCount < MAX_LOGIN_RETRIES) {
+      console.log('🔄 Retrying login...\n');
+      client.destroy();
+      setTimeout(() => loginWithRetry(), 5000);
+    } else {
+      console.error('❌ Max retries reached. Exiting.');
+      process.exit(1);
+    }
+  }, 60000); // 60 second timeout
 
-// Set a timeout to detect if login hangs
-const loginTimeout = setTimeout(() => {
-  console.error('⏰ Login timeout - no response after 30 seconds');
-  console.error('This usually means:');
-  console.error('1. Invalid token format');
-  console.error('2. Account is locked/disabled');
-  console.error('3. Network connectivity issues');
-  process.exit(1);
-}, 30000);
-
-client.login(TOKEN)
-  .then(() => {
+  try {
+    await client.login(TOKEN);
     console.log('✅ Login promise resolved!');
     clearTimeout(loginTimeout);
-  })
-  .catch((error) => {
+  } catch (error) {
     clearTimeout(loginTimeout);
     console.error('❌ Login failed!');
     console.error('Error:', error.message);
     console.error('Error code:', error.code);
-    console.error('Full error:', error);
-    process.exit(1);
+    
+    retryCount++;
+    
+    if (retryCount < MAX_LOGIN_RETRIES) {
+      console.log(`🔄 Retrying in 5 seconds... (attempt ${retryCount + 1}/${MAX_LOGIN_RETRIES})\n`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      return loginWithRetry();
+    } else {
+      console.error('❌ Max retries reached. Exiting.');
+      process.exit(1);
+    }
+  }
+}
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('📴 SIGTERM signal received: closing HTTP server and Discord client');
+  server.close(() => {
+    console.log('HTTP server closed');
   });
+  client.destroy();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('📴 SIGINT signal received: closing HTTP server and Discord client');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
+  client.destroy();
+  process.exit(0);
+});
+
+// Start the bot
+loginWithRetry();
