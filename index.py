@@ -477,8 +477,13 @@ if __name__ == '__main__':
     
     # Keep main thread alive
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        log('📴 Shutting down gracefully...')
-        log('✅ Bot stopped')
+    while True:
+        time.sleep(60)  # Changed from 1 to 60
+        
+        # Add this health check
+        if time.time() % 300 < 60:  # Every 5 minutes
+            log('💓 Service is alive')
+            
+except KeyboardInterrupt:
+    log('📴 Shutting down gracefully...')
+
