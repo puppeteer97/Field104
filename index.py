@@ -16,16 +16,16 @@ TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 BOT_A_ID = '853629533855809596'
 BOT_A_CHANNEL_ID = '1452336850415915133'
 BOT_A_GUILD_ID = '1452333704062959677'
-SD_MIN = 490
-SD_MAX = 610
+SD_MIN = 60  # Changed to 60 seconds for testing
+SD_MAX = 90  # Changed to 90 seconds for testing
 SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
 
 # Bot B (NS)
 BOT_B_ID = '1312830013573169252'
 BOT_B_CHANNEL_ID = '1453016616185892986'
 BOT_B_GUILD_ID = '1452333704062959677'
-NS_MIN = 630
-NS_MAX = 750
+NS_MIN = 60  # Changed to 60 seconds for testing
+NS_MAX = 90  # Changed to 90 seconds for testing
 NS_MESSAGES = ['ns', 'NS', 'Ns', 'nS']
 
 # -----------------------------------
@@ -101,8 +101,13 @@ def click_button(message_id, channel_id, custom_id, guild_id):
     
     try:
         r = session.post(url, headers=get_headers(), json=payload, timeout=10)
-        return r.status_code in [200, 204]
-    except:
+        if r.status_code in [200, 204]:
+            return True
+        else:
+            log(f'⚠️ Button click failed: HTTP {r.status_code} - {r.text[:200]}')
+            return False
+    except Exception as e:
+        log(f'⚠️ Button click exception: {e}')
         return False
 
 # -----------------------------------
@@ -110,7 +115,10 @@ def click_button(message_id, channel_id, custom_id, guild_id):
 # -----------------------------------
 def check_bot_a_drops(our_message_id):
     try:
+        time.sleep(1)  # Give bot time to respond
         messages = get_messages(BOT_A_CHANNEL_ID, 5)
+        
+        log(f'[BOT-A] Checking {len(messages)} recent messages...')
         
         for msg in messages:
             if msg['author']['id'] != BOT_A_ID:
@@ -160,17 +168,22 @@ def bot_a_loop():
             
             log(f'[BOT-A] 📤 Cycle {cycle}: {msg}')
             sent = send_message(BOT_A_CHANNEL_ID, msg)
-            message_counts['botA'] += 1
             
-            time.sleep(3)
-            if sent and 'id' in sent:
-                check_bot_a_drops(sent['id'])
+            if sent:
+                message_counts['botA'] += 1
+                time.sleep(3)
+                if 'id' in sent:
+                    check_bot_a_drops(sent['id'])
+            else:
+                log('[BOT-A] ⚠️ Message send failed')
                 
         except Exception as e:
-            log(f'[BOT-A] ❌ Error: {e}')
+            log(f'[BOT-A] ❌ Loop error: {e}')
+            import traceback
+            log(traceback.format_exc())
         
         wait = random.randint(SD_MIN, SD_MAX)
-        log(f'[BOT-A] ⏰ Next in {wait/60:.1f} mins\n')
+        log(f'[BOT-A] ⏰ Next in {wait} seconds\n')
         time.sleep(wait)
 
 # -----------------------------------
@@ -178,7 +191,10 @@ def bot_a_loop():
 # -----------------------------------
 def check_bot_b_drops(our_message_id):
     try:
+        time.sleep(1)  # Give bot time to respond
         messages = get_messages(BOT_B_CHANNEL_ID, 10)
+        
+        log(f'[BOT-B] Checking {len(messages)} recent messages...')
         
         button_msg = None
         stats_msg = None
@@ -233,17 +249,22 @@ def bot_b_loop():
             
             log(f'[BOT-B] 📤 Cycle {cycle}: {msg}')
             sent = send_message(BOT_B_CHANNEL_ID, msg)
-            message_counts['botB'] += 1
             
-            time.sleep(3)
-            if sent and 'id' in sent:
-                check_bot_b_drops(sent['id'])
+            if sent:
+                message_counts['botB'] += 1
+                time.sleep(3)
+                if 'id' in sent:
+                    check_bot_b_drops(sent['id'])
+            else:
+                log('[BOT-B] ⚠️ Message send failed')
                 
         except Exception as e:
-            log(f'[BOT-B] ❌ Error: {e}')
+            log(f'[BOT-B] ❌ Loop error: {e}')
+            import traceback
+            log(traceback.format_exc())
         
         wait = random.randint(NS_MIN, NS_MAX)
-        log(f'[BOT-B] ⏰ Next in {wait/60:.1f} mins\n')
+        log(f'[BOT-B] ⏰ Next in {wait} seconds\n')
         time.sleep(wait)
 
 # -----------------------------------
@@ -289,10 +310,14 @@ if __name__ == '__main__':
     
     # Start bots
     log('[BOT-A] 🔵 Starting SD bot...')
-    threading.Thread(target=bot_a_loop, daemon=True).start()
+    bot_a_thread = threading.Thread(target=bot_a_loop, daemon=True)
+    bot_a_thread.start()
+    log(f'[BOT-A] Thread alive: {bot_a_thread.is_alive()}')
     
     log('[BOT-B] 🔵 Starting NS bot...')
-    threading.Thread(target=bot_b_loop, daemon=True).start()
+    bot_b_thread = threading.Thread(target=bot_b_loop, daemon=True)
+    bot_b_thread.start()
+    log(f'[BOT-B] Thread alive: {bot_b_thread.is_alive()}')
     
     log('✅ All threads running\n')
     
