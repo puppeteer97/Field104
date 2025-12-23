@@ -6,6 +6,9 @@ const fetch = require('node-fetch');
 // -----------------------------------
 const TOKEN = process.env.AUTH_TOKEN?.trim().replace(/['"]/g, '');
 
+// Add cookie jar for session persistence
+let cookieJar = '';
+
 console.log('🔍 Checking AUTH_TOKEN...');
 if (!TOKEN) {
   console.error('❌ AUTH_TOKEN environment variable is not set!');
@@ -70,61 +73,92 @@ function getRandomVariant(variants) {
 // -----------------------------------
 // Discord HTTP API Functions
 // -----------------------------------
+
+// Initialize session by hitting Discord main page
+async function initializeSession() {
+  try {
+    log('🔐 Initializing Discord session...');
+    const response = await fetch('https://discord.com/app', {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+    
+    // Store cookies if any
+    const setCookie = response.headers.get('set-cookie');
+    if (setCookie) {
+      cookieJar = setCookie;
+      log('✅ Session cookies obtained');
+    }
+    
+    return true;
+  } catch (error) {
+    log(`⚠️ Session init failed: ${error.message}`);
+    return false;
+  }
+}
+
 async function sendMessage(channelId, content, retries = 0) {
   const url = `https://discord.com/api/v9/channels/${channelId}/messages`;
   
   try {
+    const headers = {
+      'Authorization': TOKEN,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Origin': 'https://discord.com',
+      'Referer': 'https://discord.com/channels/@me',
+      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      'X-Discord-Locale': 'en-US',
+      'X-Debug-Options': 'bugReporterEnabled'
+    };
+    
+    // Add cookies if we have them
+    if (cookieJar) {
+      headers['Cookie'] = cookieJar;
+    }
+    
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': TOKEN,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Origin': 'https://discord.com',
-        'Referer': 'https://discord.com/channels/@me',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'X-Discord-Locale': 'en-US',
-        'X-Debug-Options': 'bugReporterEnabled',
-        'X-Super-Properties': Buffer.from(JSON.stringify({
-          os: 'Windows',
-          browser: 'Chrome',
-          device: '',
-          system_locale: 'en-US',
-          browser_user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          browser_version: '120.0.0.0',
-          os_version: '10',
-          referrer: '',
-          referring_domain: '',
-          referrer_current: '',
-          referring_domain_current: '',
-          release_channel: 'stable',
-          client_build_number: 259624,
-          client_event_source: null
-        })).toString('base64')
-      },
+      headers,
       body: JSON.stringify({ content }),
       timeout: 10000
     });
 
     if (response.status === 200 || response.status === 204) {
-      return await response.json();
+      const text = await response.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (e) {
+        log(`⚠️ Response was not JSON. Status: ${response.status}, Body preview: ${text.substring(0, 100)}`);
+        throw new Error(`Invalid response format`);
+      }
     } else if (response.status === 429) {
       const data = await response.json();
       const retryAfter = (data.retry_after || 60) * 1000;
       log(`⚠️ Rate limited. Retrying after ${retryAfter/1000} seconds...`);
       await new Promise(resolve => setTimeout(resolve, retryAfter));
       return sendMessage(channelId, content, retries);
+    } else if (response.status === 401 || response.status === 403) {
+      const errorText = await response.text();
+      log(`🚫 Authentication failed! Status: ${response.status}`);
+      log(`Response: ${errorText.substring(0, 200)}`);
+      throw new Error(`Auth failed: ${response.status} - Check token validity`);
     } else {
       const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
+      log(`❌ HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+      throw new Error(`HTTP ${response.status}`);
     }
   } catch (error) {
     if (retries < MAX_RETRIES) {
@@ -523,6 +557,10 @@ process.on('SIGINT', () => {
 async function main() {
   log('🚀 Starting Discord Bot (HTTP API Method)');
   log('✅ Using stable HTTP-based approach');
+  
+  // Initialize session first
+  await initializeSession();
+  
   log('👀 Monitoring for drops...\n');
   
   // Random initial delays
