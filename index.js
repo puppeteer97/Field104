@@ -71,7 +71,7 @@ function getRandomVariant(variants) {
 // Discord HTTP API Functions
 // -----------------------------------
 async function sendMessage(channelId, content, retries = 0) {
-  const url = `https://discord.com/api/v10/channels/${channelId}/messages`;
+  const url = `https://discord.com/api/v9/channels/${channelId}/messages`;
   
   try {
     const response = await fetch(url, {
@@ -79,7 +79,36 @@ async function sendMessage(channelId, content, retries = 0) {
       headers: {
         'Authorization': TOKEN,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://discord.com',
+        'Referer': 'https://discord.com/channels/@me',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'X-Discord-Locale': 'en-US',
+        'X-Debug-Options': 'bugReporterEnabled',
+        'X-Super-Properties': Buffer.from(JSON.stringify({
+          os: 'Windows',
+          browser: 'Chrome',
+          device: '',
+          system_locale: 'en-US',
+          browser_user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          browser_version: '120.0.0.0',
+          os_version: '10',
+          referrer: '',
+          referring_domain: '',
+          referrer_current: '',
+          referring_domain_current: '',
+          release_channel: 'stable',
+          client_build_number: 259624,
+          client_event_source: null
+        })).toString('base64')
       },
       body: JSON.stringify({ content }),
       timeout: 10000
@@ -112,14 +141,34 @@ async function sendMessage(channelId, content, retries = 0) {
 }
 
 async function getChannelMessages(channelId, limit = 10) {
-  const url = `https://discord.com/api/v10/channels/${channelId}/messages?limit=${limit}`;
+  const url = `https://discord.com/api/v9/channels/${channelId}/messages?limit=${limit}`;
   
   try {
     const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': TOKEN,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://discord.com/channels/@me',
+        'X-Discord-Locale': 'en-US',
+        'X-Super-Properties': Buffer.from(JSON.stringify({
+          os: 'Windows',
+          browser: 'Chrome',
+          device: '',
+          system_locale: 'en-US',
+          browser_user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          browser_version: '120.0.0.0',
+          os_version: '10',
+          referrer: '',
+          referring_domain: '',
+          referrer_current: '',
+          referring_domain_current: '',
+          release_channel: 'stable',
+          client_build_number: 259624,
+          client_event_source: null
+        })).toString('base64')
       },
       timeout: 10000
     });
@@ -136,7 +185,7 @@ async function getChannelMessages(channelId, limit = 10) {
 }
 
 async function clickButton(messageId, channelId, customId, retries = 0) {
-  const url = `https://discord.com/api/v10/interactions`;
+  const url = `https://discord.com/api/v9/interactions`;
   
   // Simulate human delay before clicking
   const humanDelay = getRandomDelay(300, 1200);
@@ -148,7 +197,35 @@ async function clickButton(messageId, channelId, customId, retries = 0) {
       headers: {
         'Authorization': TOKEN,
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Origin': 'https://discord.com',
+        'Referer': 'https://discord.com/channels/@me',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'X-Discord-Locale': 'en-US',
+        'X-Super-Properties': Buffer.from(JSON.stringify({
+          os: 'Windows',
+          browser: 'Chrome',
+          device: '',
+          system_locale: 'en-US',
+          browser_user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          browser_version: '120.0.0.0',
+          os_version: '10',
+          referrer: '',
+          referring_domain: '',
+          referrer_current: '',
+          referring_domain_current: '',
+          release_channel: 'stable',
+          client_build_number: 259624,
+          client_event_source: null
+        })).toString('base64')
       },
       body: JSON.stringify({
         type: 3, // Component interaction
