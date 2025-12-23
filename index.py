@@ -469,12 +469,16 @@ if __name__ == '__main__':
     
     # Start Bot A loop with proper thread function
     def start_bot_a():
+        log('[BOT-A] 🔵 Thread started, waiting for initial delay...')
         time.sleep(initial_delay_a)
+        log('[BOT-A] 🟢 Initial delay complete, starting main loop...')
         bot_a_loop()
     
     # Start Bot B loop with proper thread function
     def start_bot_b():
+        log('[BOT-B] 🔵 Thread started, waiting for initial delay...')
         time.sleep(initial_delay_b)
+        log('[BOT-B] 🟢 Initial delay complete, starting main loop...')
         bot_b_loop()
     
     bot_a_thread = threading.Thread(target=start_bot_a, daemon=True)
