@@ -236,8 +236,6 @@ def check_bot_a_drops(our_message_id):
                 continue
             if 'dropping' not in message['content'].lower():
                 continue
-            if not any(m['id'] == BOT_A_ID for m in message.get('mentions', [])):
-                continue
             
             # Check if it's a reply to our message
             if message.get('referenced_message', {}).get('id') != our_message_id:
@@ -477,13 +475,12 @@ if __name__ == '__main__':
     
     # Keep main thread alive
     try:
-    while True:
-        time.sleep(60)  # Changed from 1 to 60
-        
-        # Add this health check
-        if time.time() % 300 < 60:  # Every 5 minutes
-            log('💓 Service is alive')
+        while True:
+            time.sleep(60)
             
-except KeyboardInterrupt:
-    log('📴 Shutting down gracefully...')
-
+            # Health check every 5 minutes
+            if time.time() % 300 < 60:
+                log('💓 Service is alive')
+                
+    except KeyboardInterrupt:
+        log('📴 Shutting down gracefully...')
