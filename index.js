@@ -4,9 +4,14 @@ const express = require('express');
 // Configuration from environment variable
 const TOKEN = process.env.AUTH_TOKEN;
 
+console.log('🔍 Checking AUTH_TOKEN...');
 if (!TOKEN) {
   console.error('❌ AUTH_TOKEN environment variable is not set!');
   process.exit(1);
+} else {
+  console.log('✅ AUTH_TOKEN found');
+  console.log(`📏 Token length: ${TOKEN.length} characters`);
+  console.log(`🔤 Token preview: ${TOKEN.substring(0, 10)}...${TOKEN.substring(TOKEN.length - 5)}`);
 }
 
 // Bot A Configuration
@@ -361,5 +366,15 @@ client.once('ready', () => {
   setInterval(selfPing, KEEP_ALIVE_INTERVAL);
 });
 
-// Login
-client.login(TOKEN);
+// Login with error handling
+console.log('🔐 Attempting to login...');
+client.login(TOKEN)
+  .then(() => {
+    console.log('✅ Login successful!');
+  })
+  .catch((error) => {
+    console.error('❌ Login failed!');
+    console.error('Error:', error.message);
+    console.error('Full error:', error);
+    process.exit(1);
+  });
