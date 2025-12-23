@@ -304,24 +304,28 @@ if __name__ == '__main__':
     
     log(f'✅ Token: {TOKEN[:15]}...{TOKEN[-10:]}')
     
-    # Start Flask
-    threading.Thread(target=run_server, daemon=True).start()
-    time.sleep(2)
-    
-    # Start bots
-    log('[BOT-A] 🔵 Starting SD bot...')
+    # Start bots FIRST
+    log('[BOT-A] 🔵 Starting SD bot thread...')
     bot_a_thread = threading.Thread(target=bot_a_loop, daemon=True)
     bot_a_thread.start()
     log(f'[BOT-A] Thread alive: {bot_a_thread.is_alive()}')
     
-    log('[BOT-B] 🔵 Starting NS bot...')
+    log('[BOT-B] 🔵 Starting NS bot thread...')
     bot_b_thread = threading.Thread(target=bot_b_loop, daemon=True)
     bot_b_thread.start()
     log(f'[BOT-B] Thread alive: {bot_b_thread.is_alive()}')
     
-    log('✅ All threads running\n')
+    log('✅ Bot threads started\n')
+    
+    # Start Flask LAST in daemon thread
+    log('🌐 Starting Flask in background...')
+    threading.Thread(target=run_server, daemon=True).start()
+    
+    time.sleep(2)
+    log('✅ Flask started\n')
     
     # Keep alive
+    log('♾️ Main loop running...')
     while True:
         time.sleep(60)
         uptime = int((time.time() - start_time) / 60)
