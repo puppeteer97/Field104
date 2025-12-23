@@ -24,6 +24,7 @@ else:
 # Bot A Configuration (SD)
 BOT_A_ID = '853629533855809596'
 BOT_A_CHANNEL_ID = '1452336850415915133'
+BOT_A_GUILD_ID = '1452333704062959677'  # Add your server/guild ID here
 CMD_A_MIN_DELAY = 490  # seconds
 CMD_A_MAX_DELAY = 610  # seconds
 CMD_A_VARIANTS = ['SD', 'sd', 'Sd', 'sD']
@@ -31,6 +32,7 @@ CMD_A_VARIANTS = ['SD', 'sd', 'Sd', 'sD']
 # Bot B Configuration (NS)
 BOT_B_ID = '1312830013573169252'
 BOT_B_CHANNEL_ID = '1453016616185892986'
+BOT_B_GUILD_ID = '1452333704062959677'  # Add your server/guild ID here
 CMD_B_MIN_DELAY = 630  # seconds
 CMD_B_MAX_DELAY = 750  # seconds
 CMD_B_VARIANTS = ['ns', 'NS', 'Ns', 'nS']
@@ -175,7 +177,7 @@ def get_channel_messages(channel_id, limit=10):
         log(f'⚠️ Failed to fetch messages: {e}')
         return []
 
-def click_button(message_id, channel_id, custom_id, retries=0):
+def click_button(message_id, channel_id, custom_id, guild_id, retries=0):
     url = 'https://discord.com/api/v9/interactions'
     
     # Simulate human delay
@@ -185,7 +187,7 @@ def click_button(message_id, channel_id, custom_id, retries=0):
     try:
         payload = {
             'type': 3,  # Component interaction
-            'guild_id': None,  # DM channel
+            'guild_id': guild_id,
             'channel_id': channel_id,
             'message_id': message_id,
             'data': {
@@ -210,7 +212,7 @@ def click_button(message_id, channel_id, custom_id, retries=0):
             retry_after = data.get('retry_after', 60)
             log(f'⚠️ Rate limited on button click. Retrying after {retry_after} seconds...')
             time.sleep(retry_after)
-            return click_button(message_id, channel_id, custom_id, retries)
+            return click_button(message_id, channel_id, custom_id, guild_id, retries)
             
         else:
             raise Exception(f'HTTP {response.status_code}')
@@ -219,7 +221,7 @@ def click_button(message_id, channel_id, custom_id, retries=0):
         if retries < MAX_RETRIES:
             log(f'⚠️ Button click failed (attempt {retries + 1}/{MAX_RETRIES}): {error}')
             time.sleep(RETRY_DELAY)
-            return click_button(message_id, channel_id, custom_id, retries + 1)
+            return click_button(message_id, channel_id, custom_id, guild_id, retries + 1)
         else:
             log(f'❌ Failed to click button after {MAX_RETRIES} attempts')
             return False
@@ -276,7 +278,7 @@ def check_bot_a_drops(our_message_id):
             
             log(f'[BOT-A] ✅ Selecting button {max_button["index"]} with value {max_button["value"]}')
             
-            success = click_button(message['id'], BOT_A_CHANNEL_ID, max_button['custom_id'])
+            success = click_button(message['id'], BOT_A_CHANNEL_ID, max_button['custom_id'], BOT_A_GUILD_ID)
             
             if success:
                 log('[BOT-A] 🎉 Button clicked successfully!')
@@ -369,7 +371,7 @@ def check_bot_b_drops(our_message_id):
         buttons = button_message['components'][0]['components']
         target_button = buttons[highest_index]
         
-        success = click_button(button_message['id'], BOT_B_CHANNEL_ID, target_button['custom_id'])
+        success = click_button(button_message['id'], BOT_B_CHANNEL_ID, target_button['custom_id'], BOT_B_GUILD_ID)
         
         if success:
             log(f'[BOT-B] 🎉 Clicked button {highest_index + 1} successfully!')
