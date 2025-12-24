@@ -24,11 +24,11 @@ CHANNEL_NS = '1453016616185892986'
 SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
 NS_MESSAGES = ['ns', 'NS', 'Ns', 'nS']
 
-# Delays
-SD_MIN = 500
-SD_MAX = 620
-NS_MIN = 640
-NS_MAX = 760
+# Delays (in seconds)
+SD_MIN = 540   # 9 minutes
+SD_MAX = 660   # 11 minutes
+NS_MIN = 660   # 11 minutes
+NS_MAX = 780   # 13 minutes
 
 MAX_RETRIES = 3
 RETRY_DELAY = 10
