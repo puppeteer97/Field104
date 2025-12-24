@@ -13,22 +13,17 @@ TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 
 # Bot IDs
 BOT_A_ID = '853629533855809596'
-BOT_B_ID = '1312830013573169252'
 GUILD_ID = '1452333704062959677'
 
 # Channels
 CHANNEL_SD = '1452336850415915133'
-CHANNEL_NS = '1453016616185892986'
 
 # Messages
 SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
-NS_MESSAGES = ['ns', 'NS', 'Ns', 'nS']
 
 # Delays (in seconds)
 SD_MIN = 540   # 9 minutes
 SD_MAX = 660   # 11 minutes
-NS_MIN = 660   # 11 minutes
-NS_MAX = 780   # 13 minutes
 
 MAX_RETRIES = 3
 RETRY_DELAY = 10
@@ -37,7 +32,7 @@ RETRY_DELAY = 10
 # Setup
 # -----------------------------------
 app = Flask(__name__)
-message_counts = {'sd': 0, 'ns': 0, 'clicks': 0, 'click_fails': 0}
+message_counts = {'sd': 0, 'clicks': 0, 'click_fails': 0}
 
 def get_session():
     s = requests.Session()
@@ -49,6 +44,31 @@ def get_session():
 
 def log(msg):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+
+# -----------------------------------
+# Keep-Alive Service
+# -----------------------------------
+def keep_alive():
+    """Internal keep-alive: pings itself every 10 minutes"""
+    service_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
+    
+    # Wait for service to start
+    time.sleep(60)
+    
+    while True:
+        try:
+            time.sleep(600)  # 10 minutes
+            
+            # Ping our own /ping endpoint
+            response = requests.get(f"{service_url}/ping", timeout=10)
+            
+            if response.status_code == 200:
+                log("💓 Keep-alive ping successful")
+            else:
+                log(f"⚠️ Keep-alive ping returned {response.status_code}")
+                
+        except Exception as e:
+            log(f"⚠️ Keep-alive ping failed: {e}")
 
 # -----------------------------------
 # Send Message
@@ -111,7 +131,7 @@ def get_messages(channel_id):
     return []
 
 # -----------------------------------
-# Click Button - FIXED
+# Click Button
 # -----------------------------------
 def click_button(message_id, channel_id, custom_id, button_index, value, bot_id):
     url = "https://discord.com/api/v9/interactions"
@@ -228,70 +248,6 @@ def check_sd_drop():
         log(f"⚠️ SD check error: {e}")
 
 # -----------------------------------
-# Check NS Drop
-# -----------------------------------
-def check_ns_drop():
-    try:
-        log("🔍 Checking NS drops...")
-        messages = get_messages(CHANNEL_NS)
-        
-        button_msg = None
-        stats_msg = None
-        
-        for msg in messages:
-            if msg.get('author', {}).get('id') != BOT_B_ID:
-                continue
-            
-            if msg.get('components'):
-                button_msg = msg
-            
-            if msg.get('content') and '¦' in msg.get('content', ''):
-                stats_msg = msg
-        
-        if not button_msg or not stats_msg:
-            return
-        
-        log(f"🎴 NS drop found!")
-        
-        import re
-        lines = stats_msg['content'].split('\n')
-        values = []
-        
-        for line in lines:
-            match = re.search(r'`\s*(\d+)`\s*<:nwl_s:', line)
-            if match:
-                values.append(int(match.group(1)))
-        
-        log(f"   Values: {values}")
-        
-        if not values:
-            return
-        
-        max_val = max(values)
-        max_idx = values.index(max_val)
-        
-        log(f"🎯 Highest: Button {max_idx} = {max_val}")
-        
-        buttons = button_msg['components'][0]['components']
-        
-        success = click_button(
-            button_msg['id'],
-            CHANNEL_NS,
-            buttons[max_idx]['custom_id'],
-            max_idx,
-            max_val,
-            BOT_B_ID
-        )
-        
-        if success:
-            message_counts['clicks'] += 1
-        else:
-            message_counts['click_fails'] += 1
-            
-    except Exception as e:
-        log(f"⚠️ NS check error: {e}")
-
-# -----------------------------------
 # SD Loop
 # -----------------------------------
 def sd_loop():
@@ -318,32 +274,6 @@ def sd_loop():
         time.sleep(wait)
 
 # -----------------------------------
-# NS Loop
-# -----------------------------------
-def ns_loop():
-    cycle = 0
-    initial = random.randint(10, 40)
-    log(f"🟣 NS starting in {initial}s")
-    time.sleep(initial)
-    
-    while True:
-        cycle += 1
-        msg = random.choice(NS_MESSAGES)
-        
-        log(f"🟣 NS #{cycle}: '{msg}'")
-        sent = send_message(CHANNEL_NS, msg)
-        
-        if sent:
-            message_counts['ns'] += 1
-            check_ns_drop()
-        
-        wait = random.randint(NS_MIN, NS_MAX)
-        wait += random.randint(-int(wait*0.1), int(wait*0.1))
-        
-        log(f"🟣 Next NS in {wait}s ({wait//60}m)\n")
-        time.sleep(wait)
-
-# -----------------------------------
 # Flask
 # -----------------------------------
 @app.route("/ping")
@@ -363,8 +293,7 @@ def run_server():
 # -----------------------------------
 if __name__ == "__main__":
     log("🚀 Discord Bot Farm Starting")
-    log(f"📍 SD: {CHANNEL_SD}")
-    log(f"📍 NS: {CHANNEL_NS}")
+    log(f"📍 SD Channel: {CHANNEL_SD}")
     
     if not TOKEN:
         log("❌ No token!")
@@ -375,11 +304,13 @@ if __name__ == "__main__":
     threading.Thread(target=run_server, daemon=True).start()
     time.sleep(2)
     
-    threading.Thread(target=sd_loop, daemon=True).start()
-    threading.Thread(target=ns_loop, daemon=True).start()
+    # Start keep-alive service
+    threading.Thread(target=keep_alive, daemon=True).start()
     
-    log("✅ All bots running!\n")
+    threading.Thread(target=sd_loop, daemon=True).start()
+    
+    log("✅ Bot running with keep-alive!\n")
     
     while True:
         time.sleep(300)
-        log(f"💓 SD:{message_counts['sd']} NS:{message_counts['ns']} ✅:{message_counts['clicks']} ❌:{message_counts['click_fails']}")
+        log(f"💓 SD:{message_counts['sd']} ✅:{message_counts['clicks']} ❌:{message_counts['click_fails']}")
