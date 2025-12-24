@@ -2,303 +2,250 @@ import requests
 import time
 import random
 import os
-import sys
 import threading
-import re
 from datetime import datetime
 from flask import Flask, jsonify
-
-# Force unbuffered output
-os.environ['PYTHONUNBUFFERED'] = '1'
 
 # -----------------------------------
 # Configuration
 # -----------------------------------
 TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 
-# Bot A (SD)
+# Bot A (SD) - with button clicking
 BOT_A_ID = '853629533855809596'
-BOT_A_CHANNEL_ID = '1452336850415915133'
-BOT_A_GUILD_ID = '1452333704062959677'
-SD_MIN = 60
-SD_MAX = 90
+CHANNEL_SD = '1452336850415915133'
+GUILD_ID = '1452333704062959677'
 SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
+SD_MIN = 490
+SD_MAX = 610
 
-# Bot B (NS)
-BOT_B_ID = '1312830013573169252'
-BOT_B_CHANNEL_ID = '1453016616185892986'
-BOT_B_GUILD_ID = '1452333704062959677'
-NS_MIN = 60
-NS_MAX = 90
+# Bot B (NS) - message only
+CHANNEL_NS = '1453016616185892986'
 NS_MESSAGES = ['ns', 'NS', 'Ns', 'nS']
+NS_MIN = 630
+NS_MAX = 750
+
+MAX_RETRIES = 5
+RETRY_DELAY = 5
 
 # -----------------------------------
 # Setup
 # -----------------------------------
 app = Flask(__name__)
 session = requests.Session()
-message_counts = {'botA': 0, 'botB': 0, 'errors': 0}
-start_time = time.time()
+message_counts = {'sd': 0, 'ns': 0, 'clicks': 0}
 
 def log(msg):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 # -----------------------------------
-# Discord API Functions
+# Send Message (ONLY ACTION)
 # -----------------------------------
-def get_headers():
-    return {
-        'Authorization': TOKEN,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
+def send_message(channel_id, msg):
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+    headers = {
+        "Authorization": TOKEN,
+        "Content-Type": "application/json"
     }
+    data = {"content": msg}
 
-def send_message(channel_id, content):
-    url = f'https://discord.com/api/v9/channels/{channel_id}/messages'
-    
-    for attempt in range(1, 4):
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            r = session.post(url, headers=get_headers(), json={'content': content}, timeout=10)
+            r = session.post(url, headers=headers, json=data, timeout=10)
             
+            # Don't parse JSON, just check status
             if r.status_code in [200, 204]:
-                try:
-                    return r.json()
-                except Exception:
-                    log(f'⚠️ Non-JSON success response: {r.text[:200]}')
-                    return {}
-            else:
-                log(f'⚠️ HTTP {r.status_code}: {r.text[:200]}')
-                
-            if r.status_code == 429:
-                retry_after = r.json().get('retry_after', 60)
-                log(f'Rate limited, waiting {retry_after}s')
+                log(f"✅ Sent '{msg}' to channel {channel_id}")
+                return True
+            elif r.status_code == 429:
+                retry_after = int(r.headers.get('Retry-After', 60))
+                log(f"⚠ Rate limited. Retrying after {retry_after}s...")
                 time.sleep(retry_after)
-            elif r.status_code in [401, 403]:
-                log(f'🚫 AUTH ERROR! TOKEN IS INVALID OR EXPIRED')
-                return None
+            else:
+                log(f"⚠ Status {r.status_code}")
                 
+        except requests.exceptions.Timeout:
+            log(f"⏱ Timeout on attempt {attempt}")
+        except requests.exceptions.ConnectionError:
+            log(f"🔌 Connection error on attempt {attempt}")
         except Exception as e:
-            log(f'⚠️ Exception: {e}')
-        
-        if attempt < 3:
-            time.sleep(3)
-    
-    message_counts['errors'] += 1
-    return None
+            log(f"❌ Error on attempt {attempt}: {e}")
 
-def get_messages(channel_id, limit=10):
-    url = f'https://discord.com/api/v9/channels/{channel_id}/messages?limit={limit}'
+        if attempt < MAX_RETRIES:
+            time.sleep(RETRY_DELAY)
+
+    log(f"❌ Failed to send '{msg}' after {MAX_RETRIES} attempts")
+    return False
+
+# -----------------------------------
+# Get Messages (minimal, for SD bot only)
+# -----------------------------------
+def get_recent_messages(channel_id, limit=5):
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages?limit={limit}"
+    headers = {"Authorization": TOKEN}
+    
     try:
-        r = session.get(url, headers=get_headers(), timeout=10)
+        r = session.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             return r.json()
-        else:
-            log(f'⚠️ Get messages HTTP {r.status_code}: {r.text[:200]}')
-            return []
-    except Exception as e:
-        log(f'⚠️ Get messages error: {e}')
-        return []
+    except:
+        pass
+    return []
 
-def click_button(message_id, channel_id, custom_id, guild_id):
-    url = 'https://discord.com/api/v9/interactions'
-    time.sleep(random.uniform(0.3, 1.0))
-    
+# -----------------------------------
+# Click Button (minimal, for SD bot only)
+# -----------------------------------
+def click_button(message_id, channel_id, custom_id):
+    url = "https://discord.com/api/v10/interactions"
+    headers = {
+        "Authorization": TOKEN,
+        "Content-Type": "application/json"
+    }
     payload = {
-        'type': 3,
-        'guild_id': guild_id,
-        'channel_id': channel_id,
-        'message_id': message_id,
-        'data': {'component_type': 2, 'custom_id': custom_id}
+        "type": 3,
+        "guild_id": GUILD_ID,
+        "channel_id": channel_id,
+        "message_id": message_id,
+        "data": {"component_type": 2, "custom_id": custom_id}
     }
     
     try:
-        r = session.post(url, headers=get_headers(), json=payload, timeout=10)
+        time.sleep(random.uniform(0.5, 1.5))  # Human delay
+        r = session.post(url, headers=headers, json=payload, timeout=10)
         if r.status_code in [200, 204]:
             return True
-        log(f'⚠️ Button click HTTP {r.status_code}: {r.text[:200]}')
-        return False
-    except Exception as e:
-        log(f'⚠️ Button error: {e}')
-        return False
+    except:
+        pass
+    return False
 
 # -----------------------------------
-# Bot A Logic
+# Check SD Drops (minimal logic)
 # -----------------------------------
-def check_bot_a_drops(our_message_id):
+def check_sd_drop(our_msg_id):
     try:
-        time.sleep(2)
-        messages = get_messages(BOT_A_CHANNEL_ID, 5)
+        time.sleep(3)  # Wait for bot to respond
+        messages = get_recent_messages(CHANNEL_SD, 5)
         
         for msg in messages:
-            if msg['author']['id'] != BOT_A_ID:
-                continue
-            if 'dropping' not in msg['content'].lower():
-                continue
-            if msg.get('referenced_message', {}).get('id') != our_message_id:
-                continue
-            
-            log('[BOT-A] 🎴 Drop found!')
-            
-            if not msg.get('components'):
+            # Check if it's from SOFI bot, has "dropping", and replies to us
+            if (msg.get('author', {}).get('id') != BOT_A_ID or
+                'dropping' not in msg.get('content', '').lower() or
+                msg.get('referenced_message', {}).get('id') != our_msg_id):
                 continue
             
-            buttons = msg['components'][0]['components']
+            # Get buttons
+            buttons = msg.get('components', [{}])[0].get('components', [])
+            if not buttons:
+                continue
             
+            # Parse values
             def parse_val(label):
                 if not label:
                     return 0
-                label = label.lower().strip()
+                label = str(label).lower().strip()
                 if 'k' in label:
-                    return int(float(label.replace('k', '')) * 1000)
-                return int(label) if label.isdigit() else 0
+                    try:
+                        return int(float(label.replace('k', '')) * 1000)
+                    except:
+                        return 0
+                try:
+                    return int(label)
+                except:
+                    return 0
             
-            best = max(enumerate(buttons), key=lambda x: parse_val(x[1].get('label', '')))
-            log(f'[BOT-A] Clicking button {best[0]}')
+            # Find highest
+            best_idx = 0
+            best_val = 0
+            for i, btn in enumerate(buttons):
+                val = parse_val(btn.get('label', ''))
+                if val > best_val:
+                    best_val = val
+                    best_idx = i
             
-            if click_button(msg['id'], BOT_A_CHANNEL_ID, best[1]['custom_id'], BOT_A_GUILD_ID):
-                log('[BOT-A] 🎉 Clicked!')
+            log(f"🎴 Drop found! Clicking button {best_idx} (value: {best_val})")
+            
+            if click_button(msg['id'], CHANNEL_SD, buttons[best_idx].get('custom_id')):
+                log("✅ Button clicked!")
+                message_counts['clicks'] += 1
             break
+            
     except Exception as e:
-        log(f'[BOT-A] Check error: {e}')
+        log(f"⚠️ Check drop error: {e}")
 
-def bot_a_loop():
+# -----------------------------------
+# SD Loop (with button clicking)
+# -----------------------------------
+def sd_loop():
     cycle = 0
     while True:
-        try:
-            cycle += 1
-            msg = random.choice(SD_MESSAGES)
-            log(f'[BOT-A] Cycle {cycle}: {msg}')
-            
-            sent = send_message(BOT_A_CHANNEL_ID, msg)
-            if sent:
-                message_counts['botA'] += 1
-                log(f'[BOT-A] ✅ Message sent successfully')
-                if 'id' in sent:
-                    check_bot_a_drops(sent['id'])
-            else:
-                log(f'[BOT-A] ❌ Failed to send message')
-        except Exception as e:
-            log(f'[BOT-A] Loop error: {e}')
+        msg = random.choice(SD_MESSAGES)
+        success = send_message(CHANNEL_SD, msg)
         
+        if success:
+            message_counts['sd'] += 1
+            # Try to check for drops (won't crash if it fails)
+            try:
+                check_sd_drop(None)  # We don't have message ID, so check recent
+            except:
+                pass
+        
+        cycle += 1
         wait = random.randint(SD_MIN, SD_MAX)
-        log(f'[BOT-A] Next in {wait}s\n')
+        log(f"🔵 SD cycle {cycle} done. Waiting {wait}s...")
         time.sleep(wait)
 
 # -----------------------------------
-# Bot B Logic
+# NS Loop
 # -----------------------------------
-def check_bot_b_drops(our_message_id):
-    try:
-        time.sleep(2)
-        messages = get_messages(BOT_B_CHANNEL_ID, 10)
-        
-        button_msg = None
-        stats_msg = None
-        
-        for msg in messages:
-            if msg['author']['id'] != BOT_B_ID:
-                continue
-            if msg.get('components'):
-                button_msg = msg
-            if msg.get('reference') and '¦' in msg['content']:
-                if button_msg and msg['reference'].get('message_id') == button_msg['id']:
-                    stats_msg = msg
-                    break
-        
-        if not button_msg or not stats_msg:
-            return
-        
-        log('[BOT-B] 🎴 Drop found!')
-        
-        card_values = []
-        for line in stats_msg['content'].split('\n'):
-            match = re.search(r'`\s*(\d+)`\s*<:nwl_s:', line)
-            if match:
-                card_values.append(int(match.group(1)))
-        
-        if not card_values:
-            return
-        
-        highest_idx = card_values.index(max(card_values))
-        log(f'[BOT-B] Clicking button {highest_idx + 1}')
-        
-        buttons = button_msg['components'][0]['components']
-        if click_button(button_msg['id'], BOT_B_CHANNEL_ID, buttons[highest_idx]['custom_id'], BOT_B_GUILD_ID):
-            log('[BOT-B] 🎉 Clicked!')
-            
-    except Exception as e:
-        log(f'[BOT-B] Check error: {e}')
-
-def bot_b_loop():
+def ns_loop():
     cycle = 0
     while True:
-        try:
-            cycle += 1
-            msg = random.choice(NS_MESSAGES)
-            log(f'[BOT-B] Cycle {cycle}: {msg}')
-            
-            sent = send_message(BOT_B_CHANNEL_ID, msg)
-            if sent:
-                message_counts['botB'] += 1
-                log(f'[BOT-B] ✅ Message sent successfully')
-                if 'id' in sent:
-                    check_bot_b_drops(sent['id'])
-            else:
-                log(f'[BOT-B] ❌ Failed to send message')
-        except Exception as e:
-            log(f'[BOT-B] Loop error: {e}')
+        msg = random.choice(NS_MESSAGES)
+        if send_message(CHANNEL_NS, msg):
+            message_counts['ns'] += 1
         
+        cycle += 1
         wait = random.randint(NS_MIN, NS_MAX)
-        log(f'[BOT-B] Next in {wait}s\n')
+        log(f"🟣 NS cycle {cycle} done. Waiting {wait}s...")
         time.sleep(wait)
 
 # -----------------------------------
 # Flask
 # -----------------------------------
-@app.route('/')
-def home():
-    return jsonify({'status': 'alive', 'messages': message_counts})
-
-@app.route('/ping')
+@app.route("/ping")
 def ping():
-    return 'pong'
+    return "OK"
 
-@app.route('/stats')
-def stats():
+@app.route("/")
+def status():
     return jsonify(message_counts)
 
 def run_server():
     port = int(os.environ.get('PORT', 10000))
-    log(f'Flask on port {port}')
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 # -----------------------------------
 # Main
 # -----------------------------------
-if __name__ == '__main__':
-    log('Starting bot')
+if __name__ == "__main__":
+    log("🚀 Starting minimal bot (messages only)")
     
     if not TOKEN:
-        log('No token!')
+        log("❌ No token!")
         exit(1)
     
-    log(f'Token OK: {TOKEN[:10]}...')
-    
-    # Start bots
-    log('Starting BOT-A...')
-    threading.Thread(target=bot_a_loop, daemon=True).start()
-    
-    log('Starting BOT-B...')
-    threading.Thread(target=bot_b_loop, daemon=True).start()
-    
     # Start Flask
-    log('Starting Flask...')
     threading.Thread(target=run_server, daemon=True).start()
+    time.sleep(1)
     
-    time.sleep(3)
-    log('All running!\n')
+    # Start SD
+    threading.Thread(target=sd_loop, daemon=True).start()
+    log("✅ SD loop started")
+    
+    # Start NS
+    threading.Thread(target=ns_loop, daemon=True).start()
+    log("✅ NS loop started")
     
     # Keep alive
     while True:
         time.sleep(60)
-        log(f'Alive | A:{message_counts["botA"]} B:{message_counts["botB"]} E:{message_counts["errors"]}')
