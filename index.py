@@ -22,8 +22,8 @@ CHANNEL_SD = '1452336850415915133'
 SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
 
 # Delays (in seconds)
-SD_MIN = 540   # 9 minutes
-SD_MAX = 660   # 11 minutes
+SD_MIN = 510   # 9 minutes
+SD_MAX = 760   # 11 minutes
 
 MAX_RETRIES = 3
 RETRY_DELAY = 10
