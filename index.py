@@ -13,10 +13,10 @@ TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 
 # Bot IDs
 BOT_A_ID = '853629533855809596'
-GUILD_ID = '1452333704062959677'
+GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1452333704062959677").strip()
 
 # Channels
-CHANNEL_SD = '1452336850415915133'
+CHANNEL_SD = os.environ.get("DISCORD_CHANNEL_ID", "1452336850415915133").strip()
 
 # Messages
 SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
@@ -299,7 +299,9 @@ if __name__ == "__main__":
         log("❌ No token!")
         exit(1)
     
-    log(f"✅ Token OK ({len(TOKEN)} chars)\n")
+    log(f"✅ Token OK ({len(TOKEN)} chars)")
+    log(f"✅ Guild ID: {GUILD_ID}")
+    log(f"✅ Channel ID: {CHANNEL_SD}\n")
     
     threading.Thread(target=run_server, daemon=True).start()
     time.sleep(2)
