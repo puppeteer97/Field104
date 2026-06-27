@@ -19,7 +19,7 @@ GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1452333704062959677").strip()
 CHANNEL_SD = os.environ.get("DISCORD_CHANNEL_ID", "1452336850415915133").strip()
 
 # Messages
-SD_MESSAGES = ['SD', 'sd', 'Sd', 'sD']
+SD_MESSAGES = ['MD', 'Md', 'Md', 'MD']
 
 # Delays (in seconds)
 SD_MIN = 510   # 9 minutes
