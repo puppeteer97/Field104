@@ -3,77 +3,147 @@ import time
 import random
 import os
 import threading
+import uuid
+import re
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
-# -----------------------------------
-# Configuration
-# -----------------------------------
+# =============================================
+# CONFIGURATION
+# =============================================
+
+# Get token from environment variable
 TOKEN = os.environ.get("AUTH_TOKEN", "").strip()
 
-# Bot IDs
-BOT_A_ID = '853629533855809596'
-GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1452333704062959677").strip()
+# Nai Bot IDs
+NAI_BOT_ID = '1312830013573169252'
+GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1416026295090938008").strip()
 
-# Channels
-CHANNEL_SD = os.environ.get("DISCORD_CHANNEL_ID", "1452336850415915133").strip()
+# Channel where Nai bot operates
+CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "1416346552448061440").strip()
 
-# Messages
-SD_MESSAGES = ['MD', 'Md', 'Md', 'MD']
+# Messages to send (randomized case to avoid detection)
+TRIGGER_MESSAGES = ['ns', 'nS', 'Ns', 'NS']
 
-# Delays (in seconds)
-SD_MIN = 510   # 9 minutes
-SD_MAX = 760   # 11 minutes
+# =============================================
+# DELAY CONFIGURATION (Time-based)
+# =============================================
 
+# Daytime delays (6am - 10pm): 11-15 minutes
+DAY_MIN = 660   # 11 minutes
+DAY_MAX = 900   # 15 minutes
+
+# Nighttime delays (10pm - 6am): 13-18 minutes
+NIGHT_MIN = 780   # 13 minutes
+NIGHT_MAX = 1080  # 18 minutes
+
+# Response wait time after sending message
+RESPONSE_WAIT_MIN = 8   # 8 seconds
+RESPONSE_WAIT_MAX = 12  # 12 seconds
+
+# Retry settings
 MAX_RETRIES = 3
 RETRY_DELAY = 10
 
-# -----------------------------------
-# Setup
-# -----------------------------------
+# =============================================
+# FLASK SETUP
+# =============================================
+
 app = Flask(__name__)
-message_counts = {'sd': 0, 'clicks': 0, 'click_fails': 0}
+
+# =============================================
+# STATS TRACKING
+# =============================================
+
+message_counts = {
+    'sd': 0,              # Total messages sent
+    'clicks': 0,          # Successful button clicks
+    'click_fails': 0,     # Failed button clicks
+    'cards_parsed': 0,    # Times card data was successfully parsed
+    'low_value_hits': 0,  # Times condition 1 triggered (value <= 100)
+    'high_count_hits': 0  # Times condition 2 triggered (all values > 100)
+}
+
+# =============================================
+# HELPER: Get Session
+# =============================================
 
 def get_session():
+    """
+    Create and return a requests Session with proper headers.
+    This ensures all requests have the same headers and cookies.
+    
+    Returns:
+        requests.Session: Configured session with authorization header
+    """
     s = requests.Session()
     s.headers.update({
+        'Authorization': TOKEN,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Content-Type': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9'
     })
     return s
 
+# =============================================
+# HELPER: Logging
+# =============================================
+
 def log(msg):
+    """
+    Print a timestamped log message.
+    
+    Args:
+        msg (str): Message to log
+    """
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
-# -----------------------------------
-# Keep-Alive Service
-# -----------------------------------
-def keep_alive():
-    """Internal keep-alive: pings itself every 10 minutes"""
-    service_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
-    
-    # Wait for service to start
-    time.sleep(60)
-    
-    while True:
-        try:
-            time.sleep(600)  # 10 minutes
-            
-            # Ping our own /ping endpoint
-            response = requests.get(f"{service_url}/ping", timeout=10)
-            
-            if response.status_code == 200:
-                log("💓 Keep-alive ping successful")
-            else:
-                log(f"⚠️ Keep-alive ping returned {response.status_code}")
-                
-        except Exception as e:
-            log(f"⚠️ Keep-alive ping failed: {e}")
+# =============================================
+# HELPER: Get Time-Based Delay
+# =============================================
 
-# -----------------------------------
-# Send Message
-# -----------------------------------
+def get_delay():
+    """
+    Calculate the delay based on current time of day.
+    - Day (6am-10pm): 11-15 minutes
+    - Night (10pm-6am): 13-18 minutes
+    
+    Returns:
+        int: Delay in seconds
+    """
+    current_hour = datetime.now().hour
+    
+    # Check if it's daytime (6am to 10pm)
+    if 6 <= current_hour < 22:
+        delay = random.randint(DAY_MIN, DAY_MAX)
+        time_of_day = "Day"
+    else:
+        delay = random.randint(NIGHT_MIN, NIGHT_MAX)
+        time_of_day = "Night"
+    
+    # Add small random jitter (±30 seconds)
+    delay += random.randint(-30, 30)
+    delay = max(600, delay)  # Minimum 10 minutes
+    
+    log(f"⏳ Time: {current_hour}h - {time_of_day} delay: {delay}s ({delay//60}m)")
+    return delay
+
+# =============================================
+# FUNCTION: Send Message to Discord
+# =============================================
+
 def send_message(channel_id, msg):
+    """
+    Send a message to a Discord channel.
+    Handles rate limiting and retries.
+    
+    Args:
+        channel_id (str): Discord channel ID
+        msg (str): Message content to send
+    
+    Returns:
+        dict: JSON response from Discord API, or None if failed
+    """
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages"
     session = get_session()
     headers = {
@@ -92,48 +162,101 @@ def send_message(channel_id, msg):
                     return r.json()
                 except:
                     return {"id": "unknown"}
+                    
             elif r.status_code == 429:
+                # Rate limited - wait and retry
                 retry_after = 300
                 try:
                     retry_after = int(r.headers.get('Retry-After', 300))
                 except:
                     pass
-                log(f"⚠ Rate limited. Waiting {retry_after}s...")
+                log(f"⚠️ Rate limited. Waiting {retry_after}s...")
                 time.sleep(retry_after)
                 return None
             else:
-                log(f"⚠ Status {r.status_code}")
+                log(f"⚠️ Send status {r.status_code}")
                 
         except Exception as e:
             log(f"❌ Send error: {str(e)[:100]}")
 
+        # Exponential backoff for retries
         if attempt < MAX_RETRIES:
             wait = RETRY_DELAY * (2 ** (attempt - 1))
             time.sleep(wait)
 
     return None
 
-# -----------------------------------
-# Get Messages
-# -----------------------------------
-def get_messages(channel_id):
-    url = f"https://discord.com/api/v9/channels/{channel_id}/messages?limit=5"
+# =============================================
+# FUNCTION: Get Messages from Channel
+# =============================================
+
+def get_messages(channel_id, limit=20):
+    """
+    Fetch recent messages from a Discord channel.
+    
+    Args:
+        channel_id (str): Discord channel ID
+        limit (int): Number of messages to fetch (max 100)
+    
+    Returns:
+        list: List of message objects, or empty list if failed
+    """
+    url = f"https://discord.com/api/v9/channels/{channel_id}/messages?limit={limit}"
     session = get_session()
     headers = {"Authorization": TOKEN}
     
     try:
-        time.sleep(random.uniform(2.0, 3.5))
+        # Random delay to appear human
+        time.sleep(random.uniform(1.0, 2.0))
         r = session.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
             return r.json()
-    except:
-        pass
-    return []
+        return []
+    except Exception as e:
+        log(f"⚠️ Fetch error: {e}")
+        return []
 
-# -----------------------------------
-# Click Button
-# -----------------------------------
-def click_button(message_id, channel_id, custom_id, button_index, value, bot_id):
+def get_message_by_id(channel_id, message_id):
+    """
+    Fetch a specific message by ID.
+    
+    Args:
+        channel_id (str): Discord channel ID
+        message_id (str): Message ID to fetch
+    
+    Returns:
+        dict: Message object, or None if failed
+    """
+    url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}"
+    session = get_session()
+    headers = {"Authorization": TOKEN}
+    
+    try:
+        r = session.get(url, headers=headers, timeout=15)
+        if r.status_code == 200:
+            return r.json()
+        return None
+    except Exception as e:
+        log(f"⚠️ Fetch message error: {e}")
+        return None
+
+# =============================================
+# FUNCTION: Click a Button
+# =============================================
+
+def click_button(message_id, channel_id, custom_id, bot_id):
+    """
+    Click a button on a Discord message.
+    
+    Args:
+        message_id (str): ID of the message containing the button
+        channel_id (str): Discord channel ID
+        custom_id (str): Custom ID of the button to click
+        bot_id (str): ID of the bot that owns the button
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
     url = "https://discord.com/api/v9/interactions"
     session = get_session()
     
@@ -144,28 +267,28 @@ def click_button(message_id, channel_id, custom_id, button_index, value, bot_id)
     }
     
     payload = {
-        "type": 3,
+        "type": 3,  # Message Component interaction
         "guild_id": GUILD_ID,
         "channel_id": channel_id,
         "message_id": message_id,
         "application_id": bot_id,
-        "session_id": "1234567890abcdef",
+        "session_id": str(uuid.uuid4()),  # Random session ID
         "data": {
-            "component_type": 2,
+            "component_type": 2,  # Button
             "custom_id": custom_id
-        }
+        },
+        "message_flags": 0
     }
     
-    log(f"🔘 Clicking button {button_index} (value: {value})")
-    
     try:
-        delay = random.uniform(1.5, 3.5)
+        # Random delay to appear human
+        delay = random.uniform(1.0, 2.5)
         time.sleep(delay)
         
         r = session.post(url, headers=headers, json=payload, timeout=15)
         
         if r.status_code in [200, 204]:
-            log(f"✅ Button clicked successfully!")
+            log(f"✅ Button clicked: {custom_id[:20]}...")
             return True
         else:
             log(f"❌ Click failed: {r.status_code} - {r.text[:200]}")
@@ -175,144 +298,468 @@ def click_button(message_id, channel_id, custom_id, button_index, value, bot_id)
     
     return False
 
-# -----------------------------------
-# Check SD Drop
-# -----------------------------------
-def check_sd_drop():
-    try:
-        log("🔍 Checking SD drops...")
-        messages = get_messages(CHANNEL_SD)
+# =============================================
+# FUNCTION: Parse Card Data
+# =============================================
+
+def parse_card_data(content):
+    """
+    Parse card data from Nai bot's data message.
+    Extracts both count AND value for each card.
+    
+    Format: <emoji>¦ `count` <emoji> ¦ <emoji> ¦ `value` ¦ **Name** · *Source*
+    
+    Args:
+        content (str): Message content containing card data
+    
+    Returns:
+        list: List of card dictionaries with keys:
+            - index (int): Card position (0, 1, 2)
+            - emoji (str): Emoji name
+            - count (int): First number (count/stock)
+            - value (int): Second number (value/power)
+            - name (str): Card name
+            - source (str): Source game
+    """
+    lines = content.strip().split('\n')
+    cards = []
+    
+    # Map emoji to card position
+    emoji_map = {
+        'none_1': 0,
+        'ntwo_1': 1,
+        'nthree_1': 2
+    }
+    
+    for line in lines:
+        if not line.strip():
+            continue
         
-        for msg in messages:
-            author_id = msg.get('author', {}).get('id')
-            content = msg.get('content', '')
+        # Regex to extract: emoji, count, value, name, source
+        match = re.search(r'<:(\w+):\d+>.*?¦\s*`\s*(\d+)\s*`\s*.*?¦\s*`\s*(\d+)\s*`\s*¦\s*\*\*([^*]+)\*\*\s*·\s*\*([^*]+)\*', line)
+        
+        if match:
+            emoji_name = match.group(1)
+            count = int(match.group(2).strip())
+            value = int(match.group(3).strip())
+            name = match.group(4).strip()
+            source = match.group(5).strip()
             
-            if author_id != BOT_A_ID:
-                continue
-            if 'dropping' not in content.lower():
-                continue
+            card_index = emoji_map.get(emoji_name, -1)
             
-            components = msg.get('components', [])
-            if not components:
-                continue
+            cards.append({
+                'index': card_index,
+                'emoji': emoji_name,
+                'count': count,
+                'value': value,
+                'name': name,
+                'source': source
+            })
+    
+    # Sort by index to ensure correct order
+    cards.sort(key=lambda x: x['index'])
+    return cards
+
+# =============================================
+# FUNCTION: Select Best Card
+# =============================================
+
+def select_best_card(cards):
+    """
+    Select the best card based on conditions:
+    1. If ANY card has value <= 100 -> pick the LOWEST value
+    2. If ALL cards have value > 100 -> pick the HIGHEST count
+    
+    Args:
+        cards (list): List of card dictionaries from parse_card_data()
+    
+    Returns:
+        dict: Selected card, or None if no cards
+    """
+    if not cards:
+        return None
+    
+    # Check if ANY card has value <= 100
+    has_low_value = any(card['value'] <= 100 for card in cards)
+    
+    if has_low_value:
+        log("📊 Low value found (<=100) → Selecting LOWEST value")
+        selected = min(cards, key=lambda x: x['value'])
+        message_counts['low_value_hits'] += 1
+        return selected
+    else:
+        log("📊 All values > 100 → Selecting HIGHEST count")
+        selected = max(cards, key=lambda x: x['count'])
+        message_counts['high_count_hits'] += 1
+        return selected
+
+# =============================================
+# FUNCTION: Find Button Message
+# =============================================
+
+def find_button_message(messages):
+    """
+    Find the message containing buttons.
+    Checks both direct messages and referenced messages.
+    
+    Args:
+        messages (list): List of messages to search
+    
+    Returns:
+        tuple: (message_object, is_referenced) or (None, False)
+    """
+    for msg in messages:
+        if msg.get('author', {}).get('id') != NAI_BOT_ID:
+            continue
+        
+        # Check if this message has buttons
+        if msg.get('components'):
+            return msg, False
+        
+        # Check if this message references another with buttons
+        ref = msg.get('message_reference')
+        if ref and ref.get('message_id'):
+            referenced = get_message_by_id(CHANNEL_ID, ref['message_id'])
+            if referenced and referenced.get('components'):
+                return referenced, True
+    
+    return None, False
+
+# =============================================
+# FUNCTION: Get Buttons from Message
+# =============================================
+
+def get_buttons_from_message(msg):
+    """
+    Extract all clickable buttons from a message.
+    
+    Args:
+        msg (dict): Message object
+    
+    Returns:
+        list: List of button dictionaries with keys:
+            - custom_id (str): Button custom ID
+            - label (str): Button label
+            - emoji (str): Button emoji name
+    """
+    buttons = []
+    components = msg.get('components', [])
+    
+    for row in components:
+        if row.get('type') == 1:  # Action Row
+            for comp in row.get('components', []):
+                if comp.get('type') == 2:  # Button
+                    if not comp.get('disabled', False):  # Not disabled
+                        buttons.append({
+                            'custom_id': comp.get('custom_id'),
+                            'label': comp.get('label', ''),
+                            'emoji': comp.get('emoji', {}).get('name', '')
+                        })
+    return buttons
+
+# =============================================
+# FUNCTION: Find Latest Data Message
+# =============================================
+
+def find_latest_data_message(messages):
+    """
+    Find the most recent data message from Nai bot.
+    Data messages contain card information with format: 
+    <emoji>¦ `count` <emoji> ¦ <emoji> ¦ `value` ¦ **Name** · *Source*
+    
+    Args:
+        messages (list): List of messages to search
+    
+    Returns:
+        dict: Message object, or None if not found
+    """
+    for msg in messages:
+        if msg.get('author', {}).get('id') != NAI_BOT_ID:
+            continue
+        
+        content = msg.get('content', '')
+        if content and '¦' in content and '**' in content:
+            return msg
+    
+    return None
+
+# =============================================
+# FUNCTION: Process Bot Response
+# =============================================
+
+def process_response():
+    """
+    Process the bot's response after sending a message.
+    1. Wait for response
+    2. Find button message
+    3. Parse card data
+    4. Select best card
+    5. Click the button
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        log("🔍 Processing response...")
+        
+        # Wait for response
+        wait = random.uniform(RESPONSE_WAIT_MIN, RESPONSE_WAIT_MAX)
+        log(f"⏳ Waiting {wait:.1f}s for response...")
+        time.sleep(wait)
+        
+        # Get messages
+        messages = get_messages(CHANNEL_ID, limit=20)
+        if not messages:
+            log("⚠️ No messages fetched")
+            return False
+        
+        # Find button message
+        button_msg, is_referenced = find_button_message(messages)
+        if not button_msg:
+            log("⚠️ No button message found (maybe cooldown)")
+            return False
+        
+        log(f"✅ Found button message (Referenced: {is_referenced})")
+        
+        # Get buttons
+        buttons = get_buttons_from_message(button_msg)
+        if not buttons:
+            log("⚠️ No buttons found")
+            return False
+        
+        log(f"🔘 Found {len(buttons)} buttons")
+        
+        # Find data message
+        data_msg = find_latest_data_message(messages)
+        
+        if not data_msg:
+            log("⚠️ No data message found, clicking first button")
+            target_button = buttons[0]
+            card_name = "Unknown"
+        else:
+            # Parse card data
+            cards = parse_card_data(data_msg.get('content', ''))
             
-            log(f"🎴 Drop found!")
-            
-            buttons = components[0].get('components', [])
-            if not buttons:
-                continue
-            
-            button_data = []
-            for idx, btn in enumerate(buttons):
-                label = btn.get('label', '')
-                custom_id = btn.get('custom_id', '')
-                
-                val = 0
-                try:
-                    label_str = str(label).lower().strip()
-                    if 'k' in label_str:
-                        val = int(float(label_str.replace('k', '')) * 1000)
-                    elif label_str:
-                        val = int(label_str)
-                except:
-                    val = 0
-                
-                button_data.append({
-                    'index': idx,
-                    'value': val,
-                    'custom_id': custom_id
-                })
-                
-                log(f"   Button {idx}: Value={val}")
-            
-            best = max(button_data, key=lambda x: x['value'])
-            log(f"🎯 Highest: Button {best['index']} = {best['value']}")
-            
-            success = click_button(
-                msg['id'],
-                CHANNEL_SD,
-                best['custom_id'],
-                best['index'],
-                best['value'],
-                BOT_A_ID
-            )
-            
-            if success:
-                message_counts['clicks'] += 1
+            if not cards or len(cards) < 3:
+                log(f"⚠️ Only parsed {len(cards)} cards, using first button")
+                target_button = buttons[0]
+                card_name = "Unknown"
             else:
-                message_counts['click_fails'] += 1
-            
-            break
+                # Log card data
+                log("📊 Card Data:")
+                for card in cards:
+                    log(f"   {card['name']}: Count={card['count']}, Value={card['value']}")
+                
+                # Select best card
+                selected_card = select_best_card(cards)
+                if not selected_card:
+                    target_button = buttons[0]
+                    card_name = "Unknown"
+                else:
+                    message_counts['cards_parsed'] += 1
+                    
+                    # Find matching button
+                    card_index = cards.index(selected_card)
+                    if card_index < len(buttons):
+                        target_button = buttons[card_index]
+                        card_name = selected_card['name']
+                        log(f"✅ Selected: {card_name} (Count={selected_card['count']}, Value={selected_card['value']})")
+                    else:
+                        target_button = buttons[0]
+                        card_name = "Unknown"
+        
+        # Click the button
+        log(f"🎯 Clicking button: {target_button['emoji']}")
+        success = click_button(
+            button_msg['id'],
+            CHANNEL_ID,
+            target_button['custom_id'],
+            NAI_BOT_ID
+        )
+        
+        if success:
+            message_counts['clicks'] += 1
+            log(f"✅ Success! Clicked {card_name}")
+            return True
+        else:
+            message_counts['click_fails'] += 1
+            return False
             
     except Exception as e:
-        log(f"⚠️ SD check error: {e}")
+        log(f"❌ Process error: {e}")
+        message_counts['click_fails'] += 1
+        return False
 
-# -----------------------------------
-# SD Loop
-# -----------------------------------
-def sd_loop():
+# =============================================
+# FUNCTION: Main Loop
+# =============================================
+
+def main_loop():
+    """
+    Main automation loop.
+    1. Send random variation of 'ns'
+    2. Process response
+    3. Wait based on time of day
+    4. Repeat forever
+    """
     cycle = 0
-    initial = random.randint(5, 30)
-    log(f"🔵 SD starting in {initial}s")
+    initial = random.randint(5, 15)
+    log(f"🔵 Starting in {initial}s")
     time.sleep(initial)
     
     while True:
         cycle += 1
-        msg = random.choice(SD_MESSAGES)
+        log(f"\n{'='*60}")
+        log(f"🔄 CYCLE #{cycle}")
+        log(f"{'='*60}")
         
-        log(f"🔵 SD #{cycle}: '{msg}'")
-        sent = send_message(CHANNEL_SD, msg)
+        # Get random message variation
+        msg = random.choice(TRIGGER_MESSAGES)
+        log(f"📤 Sending '{msg}'...")
+        
+        # Send message
+        sent = send_message(CHANNEL_ID, msg)
         
         if sent:
             message_counts['sd'] += 1
-            check_sd_drop()
+            process_response()
+        else:
+            log("⚠️ Send failed, will retry next cycle")
         
-        wait = random.randint(SD_MIN, SD_MAX)
-        wait += random.randint(-int(wait*0.1), int(wait*0.1))
-        
-        log(f"🔵 Next SD in {wait}s ({wait//60}m)\n")
+        # Calculate wait time based on time of day
+        wait = get_delay()
+        log(f"⏳ Next cycle in {wait}s ({wait//60}m)")
         time.sleep(wait)
 
-# -----------------------------------
-# Flask
-# -----------------------------------
+# =============================================
+# FUNCTION: Keep-Alive Service
+# =============================================
+
+def keep_alive():
+    """
+    Background thread that pings the Flask server every 10 minutes.
+    Prevents Render from sleeping the service.
+    """
+    service_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
+    
+    time.sleep(60)  # Wait for server to start
+    
+    while True:
+        try:
+            time.sleep(600)  # 10 minutes
+            
+            response = requests.get(f"{service_url}/ping", timeout=10)
+            
+            if response.status_code == 200:
+                log("💓 Keep-alive ping successful")
+            else:
+                log(f"⚠️ Keep-alive ping returned {response.status_code}")
+                
+        except Exception as e:
+            log(f"⚠️ Keep-alive ping failed: {e}")
+
+# =============================================
+# FLASK ROUTES
+# =============================================
+
 @app.route("/ping")
 def ping():
+    """
+    Health check endpoint.
+    Returns "pong" to verify service is running.
+    """
     return "pong"
 
 @app.route("/")
 def status():
-    return jsonify({'status': 'ok', 'stats': message_counts})
+    """
+    Main status endpoint.
+    Returns current stats and bot information.
+    """
+    return jsonify({
+        'status': 'ok',
+        'stats': message_counts,
+        'bot': 'Nai Automation',
+        'channel': CHANNEL_ID,
+        'bot_id': NAI_BOT_ID
+    })
+
+@app.route("/stats")
+def stats():
+    """
+    Detailed stats endpoint.
+    Returns all statistics and current time.
+    """
+    return jsonify({
+        'message_counts': message_counts,
+        'uptime': datetime.now().isoformat(),
+        'channel': CHANNEL_ID,
+        'bot_id': NAI_BOT_ID,
+        'guild_id': GUILD_ID
+    })
 
 def run_server():
+    """
+    Run the Flask server.
+    Port is set by Render environment variable or default 10000.
+    """
     port = int(os.environ.get('PORT', 10000))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-# -----------------------------------
-# Main
-# -----------------------------------
+# =============================================
+# MAIN - ENTRY POINT
+# =============================================
+
 if __name__ == "__main__":
-    log("🚀 Discord Bot Farm Starting")
-    log(f"📍 SD Channel: {CHANNEL_SD}")
+    print("\n" + "="*70)
+    print("🚀 NAI BOT AUTOMATION")
+    print("="*70)
+    print(f"📍 Channel: {CHANNEL_ID}")
+    print(f"🤖 Bot ID: {NAI_BOT_ID}")
+    print("="*70 + "\n")
     
+    # Validate token
     if not TOKEN:
-        log("❌ No token!")
+        log("❌ No token found!")
+        log("   Set AUTH_TOKEN environment variable:")
+        log("   render.com: Add environment variable AUTH_TOKEN")
+        log("   local: export AUTH_TOKEN=your_token_here")
         exit(1)
     
     log(f"✅ Token OK ({len(TOKEN)} chars)")
     log(f"✅ Guild ID: {GUILD_ID}")
-    log(f"✅ Channel ID: {CHANNEL_SD}\n")
+    log(f"✅ Channel ID: {CHANNEL_ID}")
     
+    print("\n" + "="*70)
+    print("📋 RULES:")
+    print("="*70)
+    print("   • Random message: ns/nS/Ns/NS")
+    print("   • If ANY card has value <= 100 → Pick LOWEST value")
+    print("   • If ALL cards have value > 100 → Pick HIGHEST count")
+    print(f"   • Day delay (6am-10pm): {DAY_MIN}-{DAY_MAX}s ({DAY_MIN//60}-{DAY_MAX//60}m)")
+    print(f"   • Night delay (10pm-6am): {NIGHT_MIN}-{NIGHT_MAX}s ({NIGHT_MIN//60}-{NIGHT_MAX//60}m)")
+    print("="*70 + "\n")
+    
+    # Start Flask server in background thread
+    log("🌐 Starting Flask server...")
     threading.Thread(target=run_server, daemon=True).start()
     time.sleep(2)
     
     # Start keep-alive service
+    log("💓 Starting keep-alive service...")
     threading.Thread(target=keep_alive, daemon=True).start()
     
-    threading.Thread(target=sd_loop, daemon=True).start()
+    # Start main loop
+    log("🔄 Starting main automation loop...")
+    threading.Thread(target=main_loop, daemon=True).start()
     
-    log("✅ Bot running with keep-alive!\n")
+    log("✅ Bot is running!\n")
+    log("📊 Check status at: http://localhost:10000/")
+    log("📊 Check stats at: http://localhost:10000/stats\n")
     
+    # Keep main thread alive
     while True:
         time.sleep(300)
-        log(f"💓 SD:{message_counts['sd']} ✅:{message_counts['clicks']} ❌:{message_counts['click_fails']}")
+        log(f"💓 SD:{message_counts['sd']} ✅:{message_counts['clicks']} ❌:{message_counts['click_fails']} | "
+            f"Cards:{message_counts['cards_parsed']} "
+            f"Low:{message_counts['low_value_hits']} High:{message_counts['high_count_hits']}")
