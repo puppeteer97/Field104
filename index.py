@@ -20,26 +20,22 @@ NAI_BOT_ID = '1312830013573169252'
 GUILD_ID = os.environ.get("DISCORD_GUILD_ID", "1416026295090938008").strip()
 
 # Channel where Nai bot operates
-CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "1416346552448061440").strip()
+CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "1416026296185786399").strip()
 
 # Messages to send (randomized case to avoid detection)
 TRIGGER_MESSAGES = ['ns', 'nS', 'Ns', 'NS']
 
 # =============================================
-# DELAY CONFIGURATION (Time-based)
+# DELAY CONFIGURATION
 # =============================================
 
-# Daytime delays (6am - 10pm): 11-15 minutes
-DAY_MIN = 660   # 11 minutes
-DAY_MAX = 900   # 15 minutes
+# Random delay between cycles: 660-1080 seconds (11-18 minutes)
+DELAY_MIN = 660   # 11 minutes
+DELAY_MAX = 1080  # 18 minutes
 
-# Nighttime delays (10pm - 6am): 13-18 minutes
-NIGHT_MIN = 780   # 13 minutes
-NIGHT_MAX = 1080  # 18 minutes
-
-# Response wait time after sending message
-RESPONSE_WAIT_MIN = 8   # 8 seconds
-RESPONSE_WAIT_MAX = 12  # 12 seconds
+# Response wait time after sending message (check after 4s, wait up to 15s)
+RESPONSE_WAIT_MIN = 4   # Minimum 4 seconds
+RESPONSE_WAIT_MAX = 15  # Maximum 15 seconds
 
 # Retry settings
 MAX_RETRIES = 3
@@ -99,33 +95,18 @@ def log(msg):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 # =============================================
-# HELPER: Get Time-Based Delay
+# HELPER: Get Delay
 # =============================================
 
 def get_delay():
     """
-    Calculate the delay based on current time of day.
-    - Day (6am-10pm): 11-15 minutes
-    - Night (10pm-6am): 13-18 minutes
+    Get a random delay between DELAY_MIN and DELAY_MAX.
     
     Returns:
-        int: Delay in seconds
+        int: Delay in seconds (660-1080)
     """
-    current_hour = datetime.now().hour
-    
-    # Check if it's daytime (6am to 10pm)
-    if 6 <= current_hour < 22:
-        delay = random.randint(DAY_MIN, DAY_MAX)
-        time_of_day = "Day"
-    else:
-        delay = random.randint(NIGHT_MIN, NIGHT_MAX)
-        time_of_day = "Night"
-    
-    # Add small random jitter (±30 seconds)
-    delay += random.randint(-30, 30)
-    delay = max(600, delay)  # Minimum 10 minutes
-    
-    log(f"⏳ Time: {current_hour}h - {time_of_day} delay: {delay}s ({delay//60}m)")
+    delay = random.randint(DELAY_MIN, DELAY_MAX)
+    log(f"⏳ Delay: {delay}s ({delay//60}m {delay%60}s)")
     return delay
 
 # =============================================
@@ -207,7 +188,7 @@ def get_messages(channel_id, limit=20):
     
     try:
         # Random delay to appear human
-        time.sleep(random.uniform(1.0, 2.0))
+        time.sleep(random.uniform(0.5, 1.5))
         r = session.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
             return r.json()
@@ -490,7 +471,7 @@ def find_latest_data_message(messages):
 def process_response():
     """
     Process the bot's response after sending a message.
-    1. Wait for response
+    1. Wait 4-15 seconds for response (check after 4s)
     2. Find button message
     3. Parse card data
     4. Select best card
@@ -502,7 +483,7 @@ def process_response():
     try:
         log("🔍 Processing response...")
         
-        # Wait for response
+        # Wait for response (4-15 seconds)
         wait = random.uniform(RESPONSE_WAIT_MIN, RESPONSE_WAIT_MAX)
         log(f"⏳ Waiting {wait:.1f}s for response...")
         time.sleep(wait)
@@ -598,8 +579,8 @@ def main_loop():
     """
     Main automation loop.
     1. Send random variation of 'ns'
-    2. Process response
-    3. Wait based on time of day
+    2. Process response (wait 4-15s)
+    3. Wait random delay (660-1080 seconds)
     4. Repeat forever
     """
     cycle = 0
@@ -626,9 +607,9 @@ def main_loop():
         else:
             log("⚠️ Send failed, will retry next cycle")
         
-        # Calculate wait time based on time of day
-        wait = get_delay()
-        log(f"⏳ Next cycle in {wait}s ({wait//60}m)")
+        # Calculate random wait time (660-1080 seconds)
+        wait = random.randint(DELAY_MIN, DELAY_MAX)
+        log(f"⏳ Next cycle in {wait}s ({wait//60}m {wait%60}s)")
         time.sleep(wait)
 
 # =============================================
@@ -736,8 +717,8 @@ if __name__ == "__main__":
     print("   • Random message: ns/nS/Ns/NS")
     print("   • If ANY card has value <= 100 → Pick LOWEST value")
     print("   • If ALL cards have value > 100 → Pick HIGHEST count")
-    print(f"   • Day delay (6am-10pm): {DAY_MIN}-{DAY_MAX}s ({DAY_MIN//60}-{DAY_MAX//60}m)")
-    print(f"   • Night delay (10pm-6am): {NIGHT_MIN}-{NIGHT_MAX}s ({NIGHT_MIN//60}-{NIGHT_MAX//60}m)")
+    print(f"   • Response wait: {RESPONSE_WAIT_MIN}-{RESPONSE_WAIT_MAX}s")
+    print(f"   • Delay between cycles: {DELAY_MIN}-{DELAY_MAX}s ({DELAY_MIN//60}-{DELAY_MAX//60}m)")
     print("="*70 + "\n")
     
     # Start Flask server in background thread
